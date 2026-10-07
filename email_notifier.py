@@ -92,7 +92,7 @@ class EmailNotifier:
             </div>
 
             <p>Estimado Operador,</p>
-            <p>Se han detectado <strong>desviaciones de esquema (schema drift)</strong> en la base de datos de origen para el Ruleset Productivo <strong>{ruleset_name}</strong> (ID: {ruleset_id}).</p>
+            <p>Se han detectado <strong>diferencias estructurales (schema drift)</strong> entre el inventario del Ruleset Productivo <strong>{ruleset_name}</strong> (ID: {ruleset_id}) y la estructura observada en la base de datos de origen.</p>
         """
 
         if new_structures:
@@ -198,8 +198,8 @@ class EmailNotifier:
             <div class="alert-box">
                 <strong>Acciones sugeridas:</strong>
                 <ul>
-                    <li>Si la estructura nueva requiere enmascaramiento o una tabla fue desvinculada: Asigne los algoritmos o desvincule la tabla en la consola de Delphix Engine y luego nivele de nuevo la línea base ejecutando: <code>ruleset_monitor.py --init-baseline --ruleset-id {ruleset_id} {dummy_ruleset_id}</code></li>
-                    <li>Si la estructura no es confidencial y desea aceptarla en la línea base: Ejecute: <code>ruleset_monitor.py --init-baseline --ruleset-id {ruleset_id} {dummy_ruleset_id}</code></li>
+                    <li>Revise cada diferencia y determine si corresponde a una modificación esperada, a un ajuste requerido en el Ruleset Productivo o a un problema de acceso o descubrimiento en la base de datos de origen.</li>
+                    <li>Después de aplicar las correcciones o aceptar explícitamente las diferencias, reconstruya la línea base ejecutando: <code>ruleset_monitor.py --init-baseline --ruleset-id {ruleset_id} {dummy_ruleset_id}</code></li>
                 </ul>
             </div>
 
