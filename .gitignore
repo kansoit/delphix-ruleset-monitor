@@ -1,0 +1,10 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local runtime database
+delphix_compliance_monitor.db
+
+# Local credentials and environment-specific configuration
+config.json

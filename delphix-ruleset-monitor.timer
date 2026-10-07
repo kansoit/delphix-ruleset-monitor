@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer de ejecución periódica para Delphix Ruleset Drift Monitor
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

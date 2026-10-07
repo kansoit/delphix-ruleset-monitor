@@ -1,0 +1,15 @@
+{
+  "delphix_host": "https://delphix.example.com",
+  "username": "",
+  "password": "",
+  "api_prefix": "/api/v5.1",
+  "mock_mode": true,
+  "email_enabled": false,
+  "smtp_host": "smtp.example.com",
+  "smtp_port": 587,
+  "smtp_user": "",
+  "smtp_password": "",
+  "use_tls": true,
+  "email_from": "Delphix Ruleset Monitor <delphix-monitor@example.com>",
+  "email_to": ["operations@example.com"]
+}

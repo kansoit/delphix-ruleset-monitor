@@ -1,0 +1,17 @@
+[Unit]
+Description=Delphix Continuous Compliance Ruleset Drift Monitor Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/usr/local/bin/delphix-ruleset-monitor
+Environment=DELPHIX_RULESET_MONITOR_DATA_DIR=/var/lib/delphix-ruleset-monitor
+ExecStart=/usr/bin/env python3 /usr/local/bin/delphix-ruleset-monitor/ruleset_monitor.py --audit
+StandardOutput=journal
+StandardError=journal
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
