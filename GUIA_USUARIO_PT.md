@@ -103,6 +103,14 @@ Os valores com o prefixo `b64:` são apenas ofuscados com Base64; não são crip
 
 ## Preparar o par de Rulesets no Delphix
 
+Antes de registrar um par, consulte os Rulesets existentes no Engine para identificar os IDs do Ruleset produtivo e do Ruleset de descoberta:
+
+```bash
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+A consulta exibe o ID, o nome oficial e o tipo de cada Ruleset disponível no Delphix.
+
 Antes de registrar o par nesta ferramenta, prepare o Ruleset de descoberta diretamente no Engine do Delphix Continuous Compliance:
 
 1. Identifique o Ruleset produtivo que será monitorado.

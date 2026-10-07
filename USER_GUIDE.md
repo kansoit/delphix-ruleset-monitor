@@ -103,6 +103,15 @@ Values with the `b64:` prefix are only Base64-obfuscated; they are not encrypted
 
 ## Preparing the Ruleset pair in Delphix
 
+Before registering a pair, list the Rulesets available in the Engine to identify the IDs of the productive and discovery Rulesets:
+
+```bash
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+The query displays the ID, official name, and type of each Ruleset available in Delphix.
+
+Before registering the pair in this tool, prepare the discovery Ruleset directly in the Delphix Continuous Compliance Engine:
 Before registering the pair in this tool, prepare the discovery Ruleset directly in the Delphix Continuous Compliance Engine:
 
 1. Identify the productive Ruleset to monitor.

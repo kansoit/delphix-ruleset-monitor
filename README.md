@@ -26,8 +26,8 @@ At implementation level, table changes are inferred from the presence or absence
 Follow this sequence when onboarding a new Ruleset pair:
 
 1. Configure Delphix, SMTP, and notification settings.
-2. Create the discovery Ruleset manually in Delphix and initially align its tables and fields with the productive Ruleset.
-3. Query the Rulesets available in the Engine with `--list-engine-rulesets`.
+2. Query the Rulesets available in the Engine with `--list-engine-rulesets` to identify the productive Ruleset and its ID.
+3. Create the discovery Ruleset manually in Delphix and initially align its tables and fields with the productive Ruleset.
 4. Register the productive/discovery pair with `--add-ruleset`.
 5. Create the initial baseline with `--init-baseline`.
 6. Run the audit with `--audit`.
@@ -140,6 +140,14 @@ Important configuration fields include:
 ```
 
 Productive/discovery Ruleset pairs are stored in SQLite and registered with `--add-ruleset`.
+
+Before preparing or registering a pair, list the Rulesets available in the Engine to identify the official names and IDs:
+
+```bash
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+The command displays the Ruleset ID, official name, and container type returned by the Delphix Engine.
 
 Before registering a pair, create the discovery Ruleset manually in Delphix Continuous Compliance. Its initial content must match the productive Ruleset, including the configured tables and fields. This ensures that the first inventory comparison starts from an aligned state and that the initial baseline does not contain accidental differences. The monitor validates and stores the pair; it does not create or clone Rulesets in Delphix.
 

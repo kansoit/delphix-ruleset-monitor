@@ -103,6 +103,14 @@ Los valores con prefijo `b64:` solo están ofuscados mediante Base64; no están 
 
 ## Preparar la pareja de Rulesets en Delphix
 
+Antes de registrar una pareja, consultar los Rulesets existentes en el Engine para identificar los IDs del Ruleset productivo y del Ruleset sonda:
+
+```bash
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+La consulta muestra el ID, el nombre oficial y el tipo de cada Ruleset disponible en Delphix.
+
 Antes de registrar la pareja en la herramienta, se debe preparar el Ruleset sonda directamente en el motor de Delphix Continuous Compliance:
 
 1. Identificar el Ruleset productivo que se desea monitorear.
