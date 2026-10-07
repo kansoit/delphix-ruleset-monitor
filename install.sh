@@ -32,6 +32,15 @@ else
 fi
 
 echo "3. Copiando scripts de aplicación Python..."
+# El directorio puede contener residuos de instalaciones anteriores. Estos
+# archivos no forman parte de la instalación y nunca deben quedar junto al
+# código ejecutable.
+rm -f \
+    "${INSTALL_DIR}/delphix_compliance_monitor.db" \
+    "${INSTALL_DIR}/README.md" \
+    "${INSTALL_DIR}/config.example.json"
+rm -rf "${INSTALL_DIR}/__pycache__"
+
 cp "${SCRIPT_DIR}/db_manager.py" "${INSTALL_DIR}/"
 cp "${SCRIPT_DIR}/delphix_client.py" "${INSTALL_DIR}/"
 cp "${SCRIPT_DIR}/email_notifier.py" "${INSTALL_DIR}/"
@@ -58,8 +67,8 @@ ln -sf "${INSTALL_DIR}/ruleset_monitor.py" /usr/local/bin/ruleset_monitor.py
 chown -h root:root /usr/local/bin/ruleset_monitor.py
 
 echo "6. Instalando servicios y timers de Systemd con propietario root:root..."
-cp delphix-ruleset-monitor.service /etc/systemd/system/
-cp delphix-ruleset-monitor.timer /etc/systemd/system/
+cp "${SCRIPT_DIR}/delphix-ruleset-monitor.service" /etc/systemd/system/
+cp "${SCRIPT_DIR}/delphix-ruleset-monitor.timer" /etc/systemd/system/
 
 chown root:root /etc/systemd/system/delphix-ruleset-monitor.service
 chown root:root /etc/systemd/system/delphix-ruleset-monitor.timer
