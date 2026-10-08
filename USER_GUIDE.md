@@ -35,6 +35,28 @@ The monitor covers these five cases:
 
 Known table changes are evaluated through their fields. In addition, the monitor queries the source database connector catalog to detect a table that exists in the source but is absent from both Rulesets. If a table appears with new columns, those columns are reported as new; if all known columns of a table disappear, they are reported as removed. The operational goal is to detect any relevant structural change.
 
+## Deployment models
+
+Prepare the Ruleset pair according to the masking method:
+
+### In-Place masking
+
+```text
+Productive Ruleset → source database connector
+Discovery Ruleset  → same source database connector
+```
+
+The productive Ruleset represents the approved masking configuration for the source database. The discovery Ruleset is initially aligned with it and refreshed to discover changes in that same source.
+
+### On-The-Fly masking
+
+```text
+Productive/target Ruleset → target database connector
+Discovery/source Ruleset  → source database connector
+```
+
+The On-The-Fly job uses the productive/target Ruleset and separately selects the source connector. The discovery Ruleset is used by this monitor to inspect the actual source structure. The monitor compares the expected target structure with the structure discovered in the source; intentional differences must be accepted through the baseline.
+
 ## Main concepts
 
 ### Productive Ruleset
@@ -112,7 +134,7 @@ sudo ruleset_monitor.py --list-engine-rulesets
 
 The query displays the ID, official name, and type of each Ruleset available in Delphix.
 
-Before registering the pair in this tool, prepare the discovery Ruleset directly in the Delphix Continuous Compliance Engine:
+Before registering the pair in this tool, prepare the discovery Ruleset directly in the Delphix Continuous Compliance Engine. For In-Place masking, both Rulesets use the same source connector. For On-The-Fly masking, the productive Ruleset belongs to the target connector and the discovery Ruleset belongs to the source connector. In both cases, the discovery Ruleset should initially represent the structure of the productive Ruleset, unless the source and target are intentionally different:
 Before registering the pair in this tool, prepare the discovery Ruleset directly in the Delphix Continuous Compliance Engine:
 
 1. Identify the productive Ruleset to monitor.

@@ -35,6 +35,28 @@ O monitor cobre estes cinco casos:
 
 As alterações em tabelas conhecidas são avaliadas por meio de seus campos. Além disso, o monitor consulta o catálogo do conector do banco de dados de origem para detectar uma tabela que exista na origem, mas esteja ausente nos dois Rulesets. Se uma tabela aparecer com novas colunas, essas colunas serão informadas como novas; se todas as colunas conhecidas de uma tabela desaparecerem, serão informadas como removidas. O objetivo operacional é detectar qualquer alteração estrutural relevante.
 
+## Modelos de implementação
+
+O par de Rulesets deve ser preparado de acordo com o método de mascaramento:
+
+### Mascaramento In-Place
+
+```text
+Ruleset produtivo → conector do banco de dados de origem
+Ruleset de descoberta → mesmo conector do banco de dados de origem
+```
+
+O Ruleset produtivo representa a configuração aprovada de mascaramento para o banco de dados de origem. O Ruleset de descoberta é inicialmente alinhado com ele e atualizado para descobrir alterações nessa mesma origem.
+
+### Mascaramento On-The-Fly
+
+```text
+Ruleset produtivo/destino → conector do banco de dados de destino
+Ruleset de descoberta/origem → conector do banco de dados de origem
+```
+
+O trabalho On-The-Fly utiliza o Ruleset produtivo/de destino e seleciona separadamente o conector de origem. O Ruleset de descoberta é usado por esta ferramenta para inspecionar a estrutura real da origem. O monitor compara a estrutura esperada no destino com a estrutura descoberta na origem; diferenças intencionais devem ser aceitas por meio da linha de base.
+
 ## Conceitos principais
 
 ### Ruleset produtivo
@@ -112,7 +134,7 @@ sudo ruleset_monitor.py --list-engine-rulesets
 
 A consulta exibe o ID, o nome oficial e o tipo de cada Ruleset disponível no Delphix.
 
-Antes de registrar o par nesta ferramenta, prepare o Ruleset de descoberta diretamente no Engine do Delphix Continuous Compliance:
+Antes de registrar o par nesta ferramenta, prepare o Ruleset de descoberta diretamente no Engine do Delphix Continuous Compliance. No In-Place, os dois Rulesets utilizam o mesmo conector da origem. No On-The-Fly, o Ruleset produtivo pertence ao conector de destino e o Ruleset de descoberta pertence ao conector de origem. Em ambos os casos, o Ruleset de descoberta deve inicialmente representar a estrutura do Ruleset produtivo, exceto quando existir uma diferença intencional entre origem e destino:
 
 1. Identifique o Ruleset produtivo que será monitorado.
 2. Crie um novo Ruleset para ser usado como Ruleset de descoberta.

@@ -21,6 +21,28 @@ The monitor reports these five drift cases:
 
 Known table changes are evaluated through their associated fields. In addition, the monitor queries the source connector catalog so a table that exists in the source but is absent from both Rulesets can also be detected. The operational goal remains the same: detect structural changes that may affect masking coverage.
 
+## Deployment models
+
+The Ruleset pair must be prepared according to the masking method:
+
+### In-Place masking
+
+```text
+Productive Ruleset → source database connector
+Discovery Ruleset  → same source database connector
+```
+
+The productive Ruleset represents the approved masking configuration for the source database. The discovery Ruleset is initially aligned with it and is refreshed to discover changes in that same source.
+
+### On-The-Fly masking
+
+```text
+Productive/target Ruleset → target database connector
+Discovery/source Ruleset  → source database connector
+```
+
+The On-The-Fly job uses the productive/target Ruleset and separately selects the source connector. The discovery Ruleset is used by this monitor to inspect the real source structure. The monitor compares the expected target structure with the structure discovered in the source; intentional differences must be accepted through the baseline.
+
 ## Recommended workflow
 
 Follow this sequence when onboarding a new Ruleset pair:
@@ -150,7 +172,7 @@ sudo ruleset_monitor.py --list-engine-rulesets
 
 The command displays the Ruleset ID, official name, and container type returned by the Delphix Engine.
 
-Before registering a pair, create the discovery Ruleset manually in Delphix Continuous Compliance. Its initial content must match the productive Ruleset, including the configured tables and fields. This ensures that the first inventory comparison starts from an aligned state and that the initial baseline does not contain accidental differences. The monitor validates and stores the pair; it does not create or clone Rulesets in Delphix.
+Before registering a pair, create the discovery Ruleset manually in Delphix Continuous Compliance. For In-Place masking, both Rulesets use the same source connector. For On-The-Fly masking, the productive Ruleset belongs to the target connector and the discovery Ruleset belongs to the source connector. In both cases, the discovery Ruleset should initially match the structure represented by the productive Ruleset, unless the source and target are intentionally different. The monitor validates and stores the pair; it does not create or clone Rulesets in Delphix.
 
 ## Ruleset pair management
 

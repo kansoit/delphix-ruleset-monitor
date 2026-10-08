@@ -35,6 +35,28 @@ El monitor contempla estos cinco casos:
 
 Las tablas conocidas se comparan indirectamente mediante sus campos. Además, el monitor consulta el catálogo del conector de la base de datos origen para detectar una tabla que exista en el origen pero no esté presente en ninguno de los dos Rulesets. Si aparece una tabla con columnas nuevas, esas columnas se reportan como nuevas; si desaparecen todas las columnas conocidas de una tabla, se reportan como eliminadas. El objetivo operativo es detectar cualquier cambio estructural relevante.
 
+## Modelos de implementación
+
+La pareja de Rulesets debe prepararse según el método de enmascaramiento:
+
+### Enmascaramiento In-Place
+
+```text
+Ruleset productivo → conector de la base origen
+Ruleset sonda      → mismo conector de la base origen
+```
+
+El Ruleset productivo representa la configuración aprobada de enmascaramiento para la base origen. La sonda se alinea inicialmente con él y se refresca para descubrir cambios en esa misma base.
+
+### Enmascaramiento On-The-Fly
+
+```text
+Ruleset productivo/destino → conector de la base destino
+Ruleset sonda/origen      → conector de la base origen
+```
+
+El trabajo On-The-Fly utiliza el Ruleset productivo/destino y selecciona por separado el conector origen. La sonda se utiliza para que este monitor inspeccione la estructura real del origen. El monitor compara la estructura esperada en destino con la estructura descubierta en origen; las diferencias intencionales deben aceptarse mediante la línea base.
+
 ## Conceptos principales
 
 ### Ruleset productivo
@@ -112,7 +134,7 @@ sudo ruleset_monitor.py --list-engine-rulesets
 
 La consulta muestra el ID, el nombre oficial y el tipo de cada Ruleset disponible en Delphix.
 
-Antes de registrar la pareja en la herramienta, se debe preparar el Ruleset sonda directamente en el motor de Delphix Continuous Compliance:
+Antes de registrar la pareja en la herramienta, se debe preparar el Ruleset sonda directamente en el motor de Delphix Continuous Compliance. En In-Place, ambos Rulesets utilizan el mismo conector de la base origen. En On-The-Fly, el Ruleset productivo pertenece al conector destino y el Ruleset sonda pertenece al conector origen. En ambos casos, la sonda debe representar inicialmente la estructura del Ruleset productivo, salvo que exista una diferencia intencional entre origen y destino:
 
 1. Identificar el Ruleset productivo que se desea monitorear.
 2. Crear un nuevo Ruleset para utilizarlo como sonda o discovery Ruleset.
