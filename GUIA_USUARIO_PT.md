@@ -33,7 +33,7 @@ O monitor cobre estes cinco casos:
 4. Campos removidos de uma tabela.
 5. Alterações de tipo de dado em campos existentes.
 
-As inclusões e remoções de tabelas são detectadas indiretamente por meio de seus campos. Se uma tabela aparecer com novas colunas, essas colunas serão informadas como novas; se todas as colunas conhecidas de uma tabela desaparecerem, serão informadas como removidas. O objetivo operacional é detectar qualquer alteração estrutural relevante.
+As alterações em tabelas conhecidas são avaliadas por meio de seus campos. Além disso, o monitor consulta o catálogo do conector do banco de dados de origem para detectar uma tabela que exista na origem, mas esteja ausente nos dois Rulesets. Se uma tabela aparecer com novas colunas, essas colunas serão informadas como novas; se todas as colunas conhecidas de uma tabela desaparecerem, serão informadas como removidas. O objetivo operacional é detectar qualquer alteração estrutural relevante.
 
 ## Conceitos principais
 
@@ -58,9 +58,10 @@ Para cada par ativo, o programa:
 3. Executa o refresh do Ruleset de descoberta.
 4. Aguarda a conclusão da tarefa assíncrona do Delphix.
 5. Consulta as tabelas e os campos descobertos pela sonda.
-6. Compara os dois inventários e as exclusões da linha de base.
-7. Exibe as diferenças.
-8. Envia um e-mail HTML para cada Ruleset com diferenças, se o e-mail estiver habilitado.
+6. Consulta o catálogo do conector para obter as tabelas atualmente visíveis no banco de dados de origem.
+7. Compara os dois inventários, o catálogo da origem e as exclusões da linha de base.
+8. Exibe as diferenças.
+9. Envia um e-mail HTML para cada Ruleset com diferenças, se o e-mail estiver habilitado.
 
 ## Instalação
 
@@ -187,6 +188,8 @@ sudo ruleset_monitor.py --init-baseline --ruleset-id PROD_ID DISCOVERY_ID
 ```
 
 Este comando remove as exclusões anteriores do par selecionado e recalcula as diferenças aceitas entre o Ruleset de descoberta e o produtivo. Execute-o somente depois que as diferenças tiverem sido analisadas e aceitas.
+
+Se uma tabela existir na origem, mas intencionalmente não for adicionada a nenhum dos Rulesets, a reconstrução da linha de base registrará uma exclusão para a tabela inteira. Alterações futuras em uma tabela excluída não gerarão alertas até que a exclusão seja substituída por uma nova linha de base depois que a tabela for incorporada ao monitoramento.
 
 ## Executar a auditoria
 

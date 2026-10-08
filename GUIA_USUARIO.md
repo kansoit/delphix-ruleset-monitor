@@ -33,7 +33,7 @@ El monitor contempla estos cinco casos:
 4. Campos eliminados de una tabla.
 5. Cambios de tipo de dato en campos existentes.
 
-Las altas y bajas de tablas se detectan indirectamente mediante sus campos. Si aparece una tabla con columnas nuevas, esas columnas se reportan como nuevas; si desaparecen todas las columnas conocidas de una tabla, se reportan como eliminadas. El objetivo operativo es detectar cualquier cambio estructural relevante.
+Las tablas conocidas se comparan indirectamente mediante sus campos. Además, el monitor consulta el catálogo del conector de la base de datos origen para detectar una tabla que exista en el origen pero no esté presente en ninguno de los dos Rulesets. Si aparece una tabla con columnas nuevas, esas columnas se reportan como nuevas; si desaparecen todas las columnas conocidas de una tabla, se reportan como eliminadas. El objetivo operativo es detectar cualquier cambio estructural relevante.
 
 ## Conceptos principales
 
@@ -58,9 +58,10 @@ Para cada pareja activa, el programa:
 3. Ejecuta el refresh del Ruleset sonda.
 4. Espera la finalización de la tarea asíncrona de Delphix.
 5. Consulta las tablas y campos descubiertos por la sonda.
-6. Compara ambos inventarios y las exclusiones de línea base.
-7. Muestra las diferencias en pantalla.
-8. Envía un correo HTML por cada Ruleset con diferencias, si el correo está habilitado.
+6. Consulta el catálogo del conector para obtener las tablas visibles en la base de datos origen.
+7. Compara ambos inventarios, el catálogo del origen y las exclusiones de línea base.
+8. Muestra las diferencias en pantalla.
+9. Envía un correo HTML por cada Ruleset con diferencias, si el correo está habilitado.
 
 ## Instalación
 
@@ -187,6 +188,8 @@ sudo ruleset_monitor.py --init-baseline --ruleset-id PROD_ID SONDA_ID
 ```
 
 Este comando elimina las exclusiones anteriores de la pareja seleccionada y calcula nuevamente las diferencias aceptadas entre la sonda y el Ruleset productivo. Debe ejecutarse solamente cuando las diferencias hayan sido revisadas y aceptadas.
+
+Si una tabla existe en el origen pero intencionalmente no se incorporará a ninguno de los Rulesets, este comando registra una exclusión para la tabla completa. Los cambios futuros en una tabla excluida no generarán alertas hasta que la exclusión sea reemplazada mediante una nueva línea base después de incorporar la tabla al monitoreo.
 
 ## Ejecutar la auditoría
 

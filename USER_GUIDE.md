@@ -33,7 +33,7 @@ The monitor covers these five cases:
 4. Fields removed from a table.
 5. Data type changes in existing fields.
 
-Table additions and removals are detected indirectly through their fields. If a table appears with new columns, those columns are reported as new; if all known columns of a table disappear, they are reported as removed. The operational goal is to detect any relevant structural change.
+Known table changes are evaluated through their fields. In addition, the monitor queries the source database connector catalog to detect a table that exists in the source but is absent from both Rulesets. If a table appears with new columns, those columns are reported as new; if all known columns of a table disappear, they are reported as removed. The operational goal is to detect any relevant structural change.
 
 ## Main concepts
 
@@ -58,9 +58,10 @@ For each active pair, the program:
 3. Refreshes the discovery Ruleset.
 4. Waits for the asynchronous Delphix task to finish.
 5. Retrieves the tables and fields discovered by the probe.
-6. Compares both inventories and the baseline exclusions.
-7. Displays the differences.
-8. Sends an HTML email for each Ruleset with differences, if email is enabled.
+6. Queries the connector catalog to obtain the tables currently visible in the source database.
+7. Compares both inventories, the source catalog, and the baseline exclusions.
+8. Displays the differences.
+9. Sends an HTML email for each Ruleset with differences, if email is enabled.
 
 ## Installation
 
@@ -188,6 +189,8 @@ sudo ruleset_monitor.py --init-baseline --ruleset-id PROD_ID DISCOVERY_ID
 ```
 
 This command removes the previous exclusions for the selected pair and recalculates the accepted differences between the discovery and productive Rulesets. Run it only after the differences have been reviewed and accepted.
+
+If a table exists in the source but is intentionally not added to either Ruleset, rebuilding the baseline records a table-level exclusion for it. Future changes in that excluded table will not generate alerts until the exclusion is replaced by rebuilding the baseline after the table is brought under monitoring.
 
 ## Running the audit
 

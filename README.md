@@ -19,7 +19,7 @@ The monitor reports these five drift cases:
 4. Fields removed from an existing table.
 5. Data type changes on existing fields.
 
-At implementation level, table changes are inferred from the presence or absence of their fields. A table addition or removal is therefore reported through its associated field differences. The operational goal remains the same: detect structural changes that may affect masking coverage.
+Known table changes are evaluated through their associated fields. In addition, the monitor queries the source connector catalog so a table that exists in the source but is absent from both Rulesets can also be detected. The operational goal remains the same: detect structural changes that may affect masking coverage.
 
 ## Recommended workflow
 
@@ -47,11 +47,12 @@ For each active Ruleset pair, an audit performs this sequence:
 3. Refresh the discovery Ruleset using Delphix's asynchronous refresh API.
 4. Wait until the refresh task succeeds or fails.
 5. Read the discovery Ruleset inventory.
-6. Compare discovery data with the productive snapshot and accepted baseline exclusions.
-7. Print consolidated results in the terminal.
-8. Send one HTML email per affected Ruleset when notifications are enabled.
+6. Query the source connector catalog to obtain the tables currently visible in the source database.
+7. Compare discovery data and source tables with the productive snapshot and accepted baseline exclusions.
+8. Print consolidated results in the terminal.
+9. Send one HTML email per affected Ruleset when notifications are enabled.
 
-The discovery Ruleset is configured with `refreshDropsTables = true` when required, so refresh operations can reflect tables removed from the source.
+The discovery Ruleset is configured with `refreshDropsTables = true` when required, so refresh operations can reflect tables removed from the source. The independent connector catalog query is what allows the monitor to detect tables that have not yet been added to either Ruleset.
 
 ## Repository contents
 
@@ -193,6 +194,8 @@ sudo ruleset_monitor.py --init-baseline --ruleset-id PROD_ID DISCOVERY_ID
 ```
 
 Rebuilding the baseline replaces the previous exclusions for the selected pair. Review changes carefully before using this command as an operational response to an alert.
+
+If a table exists in the source but is intentionally not added to either Ruleset, rebuilding the baseline records a table-level exclusion for it. Future changes in that excluded table will not generate alerts until the exclusion is removed by rebuilding the baseline after the table is brought under monitoring.
 
 Run an audit:
 
