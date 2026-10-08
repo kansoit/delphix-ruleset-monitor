@@ -214,6 +214,7 @@ sudo ruleset_monitor.py --list-exclusions
 sudo ruleset_monitor.py --list-exclusions --ruleset-id PROD_ID SONDA_ID
 sudo ruleset_monitor.py --list-exclusions --filter-table CLIENTES
 sudo ruleset_monitor.py --list-engine-rulesets
+sudo ruleset_monitor.py --list-orphan-exclusions
 ```
 
 ## Operaciones complementarias
@@ -226,6 +227,7 @@ Además del flujo inicial, la herramienta permite:
 - Eliminar una pareja con `--remove-ruleset`.
 - Consultar el inventario productivo con `--list-prod`.
 - Consultar las exclusiones con `--list-exclusions`.
+- Consultar exclusiones huérfanas con `--list-orphan-exclusions`.
 - Filtrar exclusiones por Ruleset o tabla.
 - Purgar todo el estado local con `--purge`.
 - Usar `mock_mode` para pruebas sin conexión con Delphix.

@@ -242,6 +242,52 @@ def run_audit_cycle(config, db, client):
         empty_message="Consulta C: No se detectaron cambios en los tipos de datos de las columnas existentes."
     )
 
+def list_orphan_exclusions(config, db):
+    """Muestra exclusiones cuya tabla ya no aparece en el catálogo del origen."""
+    client = DelphixMaskingClient(
+        host=config['delphix_host'], username=config['username'], password=config['password'],
+        api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
+    )
+    client.login()
+
+    orphan_rows = []
+    for ruleset in db.list_all_rulesets():
+        exclusions = db.list_exclusions(ruleset_filter=ruleset['prod_ruleset_id'])
+        if not exclusions:
+            continue
+
+        try:
+            connector_id = client.get_ruleset_connector_id(ruleset['dummy_ruleset_id'])
+            source_tables = {
+                str(table_name).strip().upper()
+                for table_name in client.get_connector_table_names(connector_id)
+            }
+        except Exception as e:
+            print(
+                f"[WARN] No se pudo consultar el catálogo del origen para la dupla "
+                f"{ruleset['prod_ruleset_id']} <-> {ruleset['dummy_ruleset_id']}: {e}"
+            )
+            continue
+
+        for exclusion in exclusions:
+            if exclusion['table_name'].strip().upper() not in source_tables:
+                orphan_rows.append([
+                    f"{ruleset['ruleset_alias']} (ID: {ruleset['prod_ruleset_id']})",
+                    ruleset['dummy_ruleset_id'],
+                    exclusion['table_name'],
+                    exclusion['column_name'],
+                    exclusion['created_at'],
+                    "NO EXISTE EN ORIGEN"
+                ])
+
+    print_boxed_table(
+        title="EXCLUSIONES HUÉRFANAS (TABLA AUSENTE EN EL ORIGEN)",
+        headers=["RULESET", "ID SONDA", "TABLA", "COLUMNA", "FECHA", "ESTADO"],
+        rows=orphan_rows,
+        col_widths=[30, 12, 24, 24, 22, 22],
+        empty_message="No se encontraron exclusiones huérfanas."
+    )
+
 def main():
     examples = """Ejemplos de uso del CLI:
   1. Ejecutar ciclo de auditoría estándar:
@@ -272,11 +318,14 @@ def main():
      sudo ruleset_monitor.py --list-exclusions --ruleset-id 6 7
      sudo ruleset_monitor.py --list-exclusions --filter-table CLIENTES
 
-  9. Cambiar estado de evaluación de un Ruleset (YES / NO):
+  9. Listar exclusiones huérfanas cuyo objeto ya no existe en el origen:
+     sudo ruleset_monitor.py --list-orphan-exclusions
+
+  10. Cambiar estado de evaluación de un Ruleset (YES / NO):
      sudo ruleset_monitor.py --set-active 6 7 NO
      sudo ruleset_monitor.py --set-active 6 7 YES
 
-  10. Purgar la base de datos de la herramienta en cero:
+  11. Purgar la base de datos de la herramienta en cero:
      sudo ruleset_monitor.py --purge
      sudo ruleset_monitor.py --purge -y
 """
@@ -295,6 +344,7 @@ def main():
     parser.add_argument("--list-engine-rulesets", action="store_true", help="Consulta dinámica a la API de Delphix Engine para listar la totalidad de los Rulesets existentes")
     parser.add_argument("--list-prod", action="store_true", help="Muestra el inventario productivo de tablas, columnas y algoritmos")
     parser.add_argument("--list-exclusions", action="store_true", help="Muestra las exclusiones del delta de línea base")
+    parser.add_argument("--list-orphan-exclusions", action="store_true", help="Muestra exclusiones cuya tabla ya no existe en el origen")
     parser.add_argument("--filter-table", metavar='TABLA', help="Filtra el listado de exclusiones por el nombre de la tabla")
     parser.add_argument("--set-active", nargs=3, metavar=('PROD_ID', 'SONDA_ID', 'ESTADO'), help="Establece la marca de evaluación de una dupla de Rulesets (ej. --set-active 6 7 NO)")
     parser.add_argument("--purge", action="store_true", help="Purga la totalidad de la base de datos SQLite (ruleset_config, prod_inventory, exclusions) dejando la herramienta en cero")
@@ -435,6 +485,13 @@ def main():
             col_widths=[30, 30, 30, 24],
             empty_message=f"No hay exclusiones registradas para mostrar{filter_str}."
         )
+        return
+
+    if args.list_orphan_exclusions:
+        try:
+            list_orphan_exclusions(config, db)
+        except Exception as e:
+            print(f"[ERROR] No se pudieron consultar las exclusiones huérfanas: {e}")
         return
 
     # Para comandos que requieren API de Delphix (init-baseline y audit)

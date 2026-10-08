@@ -214,6 +214,7 @@ sudo ruleset_monitor.py --list-exclusions
 sudo ruleset_monitor.py --list-exclusions --ruleset-id PROD_ID DISCOVERY_ID
 sudo ruleset_monitor.py --list-exclusions --filter-table TABLE_NAME
 sudo ruleset_monitor.py --list-engine-rulesets
+sudo ruleset_monitor.py --list-orphan-exclusions
 ```
 
 ## Scheduling
@@ -242,7 +243,7 @@ The application uses `/var/lib/delphix-ruleset-monitor` by default, so no user-s
 
 ## Complementary operations
 
-The CLI also supports listing configured pairs with `--list-config`, pausing or reactivating a pair with `--set-active`, removing a pair with `--remove-ruleset`, inspecting the productive inventory with `--list-prod`, inspecting baseline exclusions with `--list-exclusions`, and clearing all local state with `--purge`. Use `mock_mode` for development without contacting Delphix.
+The CLI also supports listing configured pairs with `--list-config`, pausing or reactivating a pair with `--set-active`, removing a pair with `--remove-ruleset`, inspecting the productive inventory with `--list-prod`, inspecting baseline exclusions with `--list-exclusions`, finding orphan exclusions with `--list-orphan-exclusions`, and clearing all local state with `--purge`. Use `mock_mode` for development without contacting Delphix.
 
 ## Local persistence
 
