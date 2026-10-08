@@ -182,9 +182,12 @@ def run_audit_cycle(config, db, client):
         client.poll_async_task(async_task_id)
 
         dummy_items = client.get_ruleset_tables_and_columns(dummy_id)
+        connector_id = client.get_ruleset_connector_id(dummy_id)
+        source_table_names = client.get_connector_table_names(connector_id)
+        print(f" -> Catálogo del origen consultado mediante conector {connector_id}: {len(source_table_names)} tabla(s).")
 
         # Paso 3: Análisis de Deltas
-        analysis = db.analyze_drift(prod_id, dummy_items)
+        analysis = db.analyze_drift(prod_id, dummy_items, source_table_names)
         new_structs = analysis['new_structures']
         deleted_structs = analysis['deleted_structures']
         drifts = analysis['data_type_drifts']
@@ -207,10 +210,15 @@ def run_audit_cycle(config, db, client):
             notifier.send_audit_alert(prod_name, prod_id, dummy_id, new_structs, deleted_structs, drifts)
 
     # Renderizar tablas consolidadas en consola
-    new_rows = [[s.get('ruleset_name', 'Default'), s['table_name'], s['column_name'], s['data_type']] for s in all_new_structures]
+    new_rows = [[
+        s.get('ruleset_name', 'Default'),
+        s['table_name'],
+        'Tabla completa' if s['column_name'] == '*' else s['column_name'],
+        s['data_type']
+    ] for s in all_new_structures]
     print_boxed_table(
-        title=f"⚠️ ALERTA: ESTRUCTURAS NUEVAS DETECTADAS EN ORIGEN ({len(all_new_structures)} columnas)",
-        headers=["RULESET", "TABLA ORIGEN", "COLUMNA DETECTADA", "TIPO DE DATO"],
+        title=f"⚠️ ALERTA: ESTRUCTURAS NUEVAS DETECTADAS EN ORIGEN ({len(all_new_structures)} estructuras)",
+        headers=["RULESET", "TABLA ORIGEN", "COLUMNA / ESTRUCTURA", "TIPO DE DATO"],
         rows=new_rows,
         col_widths=[30, 28, 28, 20],
         empty_message="Consulta A: No se detectaron estructuras nuevas en el origen sin registrar."
@@ -462,12 +470,14 @@ def main():
             client.poll_async_task(async_task_id)
 
             dummy_items = client.get_ruleset_tables_and_columns(d_id)
+            connector_id = client.get_ruleset_connector_id(d_id)
+            source_table_names = client.get_connector_table_names(connector_id)
 
             # 3. Pisar y recalcular delta en exclusions
-            c = db.reset_baseline_exclusions(p_id, dummy_items)
+            c = db.reset_baseline_exclusions(p_id, dummy_items, source_table_names)
             total_exclusions += c
 
-        print(f"✅ Línea Base nivelada exitosamente. Se registraron {total_exclusions} columnas en el delta de exclusiones{r_msg}.")
+        print(f"✅ Línea Base nivelada exitosamente. Se registraron {total_exclusions} elementos en el delta de exclusiones{r_msg}.")
         return
 
     if args.audit:

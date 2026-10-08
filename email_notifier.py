@@ -97,14 +97,14 @@ class EmailNotifier:
 
         if new_structures:
             html += f"""
-            <h4 style="color: #155724;">⚠️ Estructuras Nuevas Detectadas en Origen ({len(new_structures)} columnas)</h4>
+            <h4 style="color: #155724;">⚠️ Estructuras Nuevas Detectadas en Origen ({len(new_structures)} estructuras)</h4>
             <p>Las siguientes tablas/columnas existen en el origen pero <strong>NO están configuradas en el Ruleset Productivo ni registradas en la línea base de exclusiones</strong>:</p>
             <table>
                 <thead>
                     <tr>
                         <th>Ruleset</th>
                         <th>Tabla</th>
-                        <th>Columna</th>
+                        <th>Columna / Estructura</th>
                         <th>Tipo de Dato</th>
                         <th>Estado</th>
                     </tr>
@@ -113,11 +113,12 @@ class EmailNotifier:
             """
             for item in new_structures:
                 r_name = item.get('ruleset_name', 'Default')
+                column_name = 'Tabla completa' if item['column_name'] == '*' else item['column_name']
                 html += f"""
                     <tr>
                         <td><code>{r_name}</code></td>
                         <td><strong>{item['table_name']}</strong></td>
-                        <td>{item['column_name']}</td>
+                        <td>{column_name}</td>
                         <td><code>{item['data_type']}</code></td>
                         <td><span class="badge-new">NUEVO EN ORIGEN</span></td>
                     </tr>

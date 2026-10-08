@@ -160,10 +160,12 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     # --- Métodos de Exclusiones / Línea Base ---
-    def reset_baseline_exclusions(self, prod_ruleset_id, dummy_items):
+    def reset_baseline_exclusions(self, prod_ruleset_id, dummy_items, source_table_names=None):
         """
         Pisa y recalcula la Línea Base para un prod_ruleset_id específico:
-        Calcula Delta = (Sonda - Productivo) e inserta en exclusions.
+        Calcula el delta de la sonda y del catálogo del origen contra producción.
+        Las tablas visibles en el origen pero ausentes en ambos Rulesets se
+        registran con la columna especial '*'.
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -183,6 +185,19 @@ class DatabaseManager:
                         INSERT OR IGNORE INTO exclusions (prod_ruleset_id, table_name, column_name)
                         VALUES (?, ?, ?)
                     """, (prod_ruleset_id, item['table_name'], item['column_name']))
+                    inserted_count += 1
+
+            prod_tables = {row['table_name'].upper() for row in cursor.execute(
+                "SELECT DISTINCT table_name FROM prod_inventory WHERE prod_ruleset_id = ?",
+                (prod_ruleset_id,)
+            )}
+            dummy_tables = {item['table_name'].upper() for item in dummy_items}
+            for table_name in source_table_names or []:
+                if table_name.upper() not in prod_tables and table_name.upper() not in dummy_tables:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO exclusions (prod_ruleset_id, table_name, column_name)
+                        VALUES (?, ?, '*')
+                    """, (prod_ruleset_id, table_name))
                     inserted_count += 1
             conn.commit()
             return inserted_count
@@ -204,7 +219,7 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
 
     # --- Consultas de Deriva para Auditoría ---
-    def analyze_drift(self, prod_ruleset_id, dummy_items):
+    def analyze_drift(self, prod_ruleset_id, dummy_items, source_table_names=None):
         """
         Compara los ítems descubiertos en la Sonda (dummy_items) contra prod_inventory y exclusions
         para un prod_ruleset_id específico. Retorna dict con (new_structures, deleted_structures, data_type_drifts).
@@ -219,6 +234,7 @@ class DatabaseManager:
             # 2. Obtener Exclusiones
             cursor.execute("SELECT table_name, column_name FROM exclusions WHERE prod_ruleset_id = ?", (prod_ruleset_id,))
             excl_set = {(row['table_name'].upper(), row['column_name'].upper()) for row in cursor.fetchall()}
+            excluded_tables = {table for table, column in excl_set if column == '*'}
 
             dummy_dict = {(item['table_name'].upper(), item['column_name'].upper()): item for item in dummy_items}
 
@@ -228,12 +244,24 @@ class DatabaseManager:
 
             # Consulta A: Estructuras Nuevas (En Origen/Sonda pero NO en Prod ni en Exclusiones)
             for key, dummy_item in dummy_dict.items():
-                if key not in prod_dict and key not in excl_set:
+                if key not in prod_dict and key not in excl_set and key[0] not in excluded_tables:
                     new_structures.append({
                         'prod_ruleset_id': prod_ruleset_id,
                         'table_name': dummy_item['table_name'],
                         'column_name': dummy_item['column_name'],
                         'data_type': dummy_item.get('data_type', 'VARCHAR')
+                    })
+
+            prod_tables = {key[0] for key in prod_dict}
+            dummy_tables = {key[0] for key in dummy_dict}
+            for table_name in source_table_names or []:
+                table_key = table_name.upper()
+                if table_key not in prod_tables and table_key not in dummy_tables and table_key not in excluded_tables:
+                    new_structures.append({
+                        'prod_ruleset_id': prod_ruleset_id,
+                        'table_name': table_name,
+                        'column_name': '*',
+                        'data_type': 'TABLE'
                     })
 
             # Consulta B: Estructuras Eliminadas (En Prod pero NO en Origen/Sonda)

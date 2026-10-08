@@ -111,6 +111,71 @@ class DelphixMaskingClient:
             print(f"[ERROR] Error al consultar la lista completa de Rulesets en Delphix Engine: {e}")
             return []
 
+    def get_ruleset_details(self, ruleset_id):
+        """Obtiene el detalle de un Ruleset, incluido el conector asociado."""
+        if self.mock_mode:
+            return {
+                "databaseRulesetId": ruleset_id,
+                "databaseConnectorId": 1,
+                "rulesetName": f"Mock_Ruleset_{ruleset_id}"
+            }
+
+        url = f"{self.host}{self.api_prefix}/database-rulesets/{ruleset_id}"
+        req = urllib.request.Request(url, headers={'Authorization': self.token}, method='GET')
+        try:
+            with urllib.request.urlopen(req, context=self.ctx) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if isinstance(data, dict) and data.get('responseList'):
+                    return data['responseList'][0]
+                return data
+        except Exception as e:
+            raise RuntimeError(f"No se pudo obtener el detalle del Ruleset {ruleset_id}: {e}") from e
+
+    def get_ruleset_connector_id(self, ruleset_id):
+        """Obtiene el ID del conector de base de datos asociado a un Ruleset."""
+        details = self.get_ruleset_details(ruleset_id)
+        connector_id = (
+            details.get('databaseConnectorId')
+            or details.get('connectorId')
+            or details.get('database_connector_id')
+        )
+        if not connector_id:
+            raise RuntimeError(f"El Ruleset {ruleset_id} no informa un databaseConnectorId.")
+        return int(connector_id)
+
+    def get_connector_table_names(self, connector_id):
+        """Obtiene del conector las tablas actualmente visibles en la base de datos origen."""
+        if self.mock_mode:
+            return ["CUSTOMERS", "ORDERS", "AUDIT_LOGS", "TMP_STAGING", "NEW_SOURCE_TABLE"]
+
+        url = f"{self.host}{self.api_prefix}/database-connectors/{connector_id}/fetch"
+        req = urllib.request.Request(url, headers={'Authorization': self.token}, method='GET')
+        try:
+            with urllib.request.urlopen(req, context=self.ctx) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            if isinstance(data, list):
+                raw_names = data
+            elif isinstance(data, dict):
+                raw_names = data.get('responseList', data.get('results', data.get('tables', [])))
+            else:
+                raw_names = []
+
+            names = []
+            for item in raw_names:
+                if isinstance(item, str):
+                    name = item
+                elif isinstance(item, dict):
+                    name = item.get('tableName') or item.get('table_name') or item.get('name')
+                else:
+                    name = None
+                if name:
+                    names.append(str(name))
+            return sorted(set(names), key=str.upper)
+        except Exception as e:
+            raise RuntimeError(
+                f"No se pudo consultar el catálogo de tablas del conector {connector_id}: {e}"
+            ) from e
+
     def ensure_refresh_drops_tables(self, ruleset_id):
         """Asegura que el Ruleset en Delphix Engine tenga refreshDropsTables=True para tolerar bajas de tablas en la sonda de descubrimiento"""
         if self.mock_mode:
