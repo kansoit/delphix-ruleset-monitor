@@ -19,6 +19,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # age se utiliza para cifrar las credenciales de config.json
+# sudo suele reemplazar PATH por un secure_path sin /usr/local/bin, donde se instala age
+PATH="${PATH}:/usr/local/bin"
 if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
   echo "❌ Error: No se encontraron los binarios 'age' y 'age-keygen'."
   echo "   Instale age antes de continuar (ej. 'dnf install age' desde EPEL)."

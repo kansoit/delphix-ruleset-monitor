@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import getpass
+import shutil
 import subprocess
 import time
 from db_manager import DatabaseManager
@@ -16,6 +17,8 @@ AGE_KEY_PATH = "/etc/delphix-ruleset-monitor/age.key"
 # Campos de la configuración que se almacenan cifrados con age
 SECRET_FIELDS = ("username", "password", "smtp_user", "smtp_password")
 AGE_ARMOR_HEADER = "-----BEGIN AGE ENCRYPTED FILE-----"
+# sudo suele reemplazar PATH por un secure_path sin /usr/local/bin, donde se instala age
+AGE_SEARCH_PATH = os.pathsep.join([os.environ.get("PATH", ""), "/usr/local/bin"])
 
 # Código de salida para ejecuciones parciales (algún Ruleset no pudo procesarse).
 # El servicio systemd lo declara en SuccessExitStatus para no quedar en estado 'failed'.
@@ -23,10 +26,10 @@ EXIT_PARTIAL = 75
 
 def run_age(args, input_text=None):
     """Ejecuta un binario de age y retorna su salida estándar."""
-    try:
-        result = subprocess.run(args, input=input_text, capture_output=True, text=True)
-    except FileNotFoundError:
+    binary = shutil.which(args[0], path=AGE_SEARCH_PATH)
+    if binary is None:
         raise RuntimeError(f"No se encontró el binario '{args[0]}'. Instale age (ej. 'dnf install age' desde EPEL).")
+    result = subprocess.run([binary] + args[1:], input=input_text, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"'{args[0]}' finalizó con error: {result.stderr.strip()}")
     return result.stdout
