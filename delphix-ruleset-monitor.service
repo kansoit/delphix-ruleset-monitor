@@ -8,6 +8,8 @@ Type=oneshot
 User=root
 WorkingDirectory=/usr/local/bin/delphix-ruleset-monitor
 Environment=DELPHIX_RULESET_MONITOR_DATA_DIR=/var/lib/delphix-ruleset-monitor
+# Sin búfer: cada línea llega al journal con la hora en que se emite
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/env python3 /usr/local/bin/delphix-ruleset-monitor/ruleset_monitor.py --audit
 StandardOutput=journal
 StandardError=journal
