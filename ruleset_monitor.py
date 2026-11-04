@@ -3,40 +3,55 @@ import json
 import os
 import sys
 import argparse
-import base64
 import getpass
+import subprocess
 import time
 from db_manager import DatabaseManager
 from delphix_client import DelphixMaskingClient
 from email_notifier import EmailNotifier
 
 DEFAULT_CONFIG_PATH = "/etc/delphix-ruleset-monitor/config.json"
+AGE_KEY_PATH = "/etc/delphix-ruleset-monitor/age.key"
+
+# Campos de la configuración que se almacenan cifrados con age
+SECRET_FIELDS = ("username", "password", "smtp_user", "smtp_password")
+AGE_ARMOR_HEADER = "-----BEGIN AGE ENCRYPTED FILE-----"
 
 # Código de salida para ejecuciones parciales (algún Ruleset no pudo procesarse).
 # El servicio systemd lo declara en SuccessExitStatus para no quedar en estado 'failed'.
 EXIT_PARTIAL = 75
 
-def decode_secret(val):
-    """Desofusca un secreto Base64 con prefijo 'b64:'"""
-    if not val or not isinstance(val, str):
-        return val
-    if val.startswith("b64:"):
-        encoded_part = val[4:]
-        try:
-            return base64.b64decode(encoded_part.encode('utf-8')).decode('utf-8')
-        except Exception as e:
-            print(f"[WARN] Error al decodificar un valor Base64 de la configuración: {e}")
-            return val
-    return val
+def run_age(args, input_text=None):
+    """Ejecuta un binario de age y retorna su salida estándar."""
+    try:
+        result = subprocess.run(args, input=input_text, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise RuntimeError(f"No se encontró el binario '{args[0]}'. Instale age (ej. 'dnf install age' desde EPEL).")
+    if result.returncode != 0:
+        raise RuntimeError(f"'{args[0]}' finalizó con error: {result.stderr.strip()}")
+    return result.stdout
 
-def encode_secret(val):
-    """Ofusca un texto plano en Base64 con prefijo 'b64:'"""
+def ensure_age_identity():
+    """Crea la identidad age si no existe y retorna su clave pública (recipient)."""
+    if not os.path.exists(AGE_KEY_PATH):
+        run_age(["age-keygen", "-o", AGE_KEY_PATH])
+        print(f"[INFO] Identidad age generada en '{AGE_KEY_PATH}'. Respáldela por separado: sin ella no es posible descifrar la configuración.")
+    os.chmod(AGE_KEY_PATH, 0o600)
+    return run_age(["age-keygen", "-y", AGE_KEY_PATH]).strip()
+
+def encrypt_secret(val, recipient):
+    """Cifra un secreto con age en formato ASCII armor."""
     if not val:
         return ""
-    if val.startswith("b64:"):
+    return run_age(["age", "-e", "-a", "-r", recipient], input_text=val)
+
+def decrypt_secret(val):
+    """Descifra un secreto cifrado con age. Los valores vacíos se retornan sin cambios."""
+    if not val:
         return val
-    b64_str = base64.b64encode(val.encode('utf-8')).decode('utf-8')
-    return f"b64:{b64_str}"
+    if not val.startswith(AGE_ARMOR_HEADER):
+        raise RuntimeError("el valor no está cifrado con age. Ejecute 'sudo ruleset_monitor.py --configure' para cifrarlo.")
+    return run_age(["age", "-d", "-i", AGE_KEY_PATH], input_text=val)
 
 def print_boxed_table(title, headers, rows, col_widths, empty_message="No hay registros para mostrar."):
     """Renderiza una tabla con marcos ASCII/Unicode limpios si hay datos"""
@@ -85,29 +100,39 @@ def interactive_setup():
         except Exception:
             pass
 
+    recipient = ensure_age_identity()
+
+    # Los secretos existentes se descifran solo para ofrecerlos como valores por defecto
+    existing_secrets = {}
+    for field in SECRET_FIELDS:
+        try:
+            existing_secrets[field] = decrypt_secret(existing_config.get(field, ""))
+        except RuntimeError:
+            existing_secrets[field] = ""
+
     def prompt(msg, default=""):
         val = input(f"{msg} [{default}]: ").strip()
         return val if val else default
 
     def prompt_secret(msg, default=""):
         val = getpass.getpass(f"{msg} (Entrada oculta) [{ '********' if default else '' }]: ").strip()
-        return val if val else decode_secret(default)
+        return val if val else default
 
     def prompt_bool(msg, default):
         val = prompt(f"{msg} (true/false)", "true" if default else "false")
         return val.lower() in ['true', '1', 'si', 'yes']
 
     delphix_host = prompt("Host de Delphix Engine (URL)", existing_config.get("delphix_host", "https://delphix.example.com"))
-    username = prompt("Usuario de Delphix Engine", decode_secret(existing_config.get("username", "")))
-    password = prompt_secret("Contraseña de Delphix Engine", existing_config.get("password", ""))
+    username = prompt("Usuario de Delphix Engine", existing_secrets["username"])
+    password = prompt_secret("Contraseña de Delphix Engine", existing_secrets["password"])
 
     print("\n--- Configuración de Notificaciones por Correo (SMTP) ---")
     email_enabled = prompt_bool("¿Habilitar notificaciones por correo?", existing_config.get("email_enabled", True))
 
     smtp_host = prompt("Servidor SMTP", existing_config.get("smtp_host", "smtp.example.com"))
     smtp_port = int(prompt("Puerto SMTP", str(existing_config.get("smtp_port", 587))))
-    smtp_user = prompt("Usuario SMTP", decode_secret(existing_config.get("smtp_user", "")))
-    smtp_password = prompt_secret("Contraseña SMTP", existing_config.get("smtp_password", ""))
+    smtp_user = prompt("Usuario SMTP", existing_secrets["smtp_user"])
+    smtp_password = prompt_secret("Contraseña SMTP", existing_secrets["smtp_password"])
     use_tls = prompt_bool("¿Utilizar TLS?", existing_config.get("use_tls", True))
 
     email_from = prompt("Remitente (From)", existing_config.get("email_from", "Delphix Ruleset Monitor <delphix-monitor@example.com>"))
@@ -118,14 +143,14 @@ def interactive_setup():
     new_config = dict(existing_config)
     new_config.update({
         "delphix_host": delphix_host,
-        "username": encode_secret(username),
-        "password": encode_secret(password),
+        "username": encrypt_secret(username, recipient),
+        "password": encrypt_secret(password, recipient),
         "api_prefix": existing_config.get("api_prefix", "/masking/api"),
         "email_enabled": email_enabled,
         "smtp_host": smtp_host,
         "smtp_port": smtp_port,
-        "smtp_user": encode_secret(smtp_user),
-        "smtp_password": encode_secret(smtp_password),
+        "smtp_user": encrypt_secret(smtp_user, recipient),
+        "smtp_password": encrypt_secret(smtp_password, recipient),
         "use_tls": use_tls,
         "email_from": email_from,
         "email_to": email_to
@@ -135,7 +160,7 @@ def interactive_setup():
         json.dump(new_config, f, indent=2)
 
     os.chmod(config_path, 0o600)
-    print(f"\n✅ Configuración guardada en '{config_path}' con permisos chmod 600.")
+    print(f"\n✅ Configuración guardada en '{config_path}' con permisos chmod 600 y credenciales cifradas con age.")
 
 def load_config():
     config_path = DEFAULT_CONFIG_PATH
@@ -148,9 +173,12 @@ def load_config():
     with open(config_path, 'r', encoding='utf-8') as f:
         raw_cfg = json.load(f)
 
-    for k, v in raw_cfg.items():
-        if isinstance(v, str):
-            raw_cfg[k] = decode_secret(v)
+    for field in SECRET_FIELDS:
+        try:
+            raw_cfg[field] = decrypt_secret(raw_cfg.get(field, ""))
+        except RuntimeError as e:
+            print(f"[ERROR] No se pudo descifrar '{field}' de {config_path}: {e}")
+            sys.exit(1)
 
     return raw_cfg
 

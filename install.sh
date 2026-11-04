@@ -18,6 +18,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# age se utiliza para cifrar las credenciales de config.json
+if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+  echo "❌ Error: No se encontraron los binarios 'age' y 'age-keygen'."
+  echo "   Instale age antes de continuar (ej. 'dnf install age' desde EPEL)."
+  exit 1
+fi
+
 echo "1. Creando directorios de instalación y datos..."
 mkdir -p "${INSTALL_DIR}"
 mkdir -p "${DATA_DIR}"
@@ -57,6 +64,10 @@ chmod 755 "${CONFIG_DIR}"
 if [ -f "${CONFIG_DIR}/config.json" ]; then
     chown root:root "${CONFIG_DIR}/config.json"
     chmod 600 "${CONFIG_DIR}/config.json"
+fi
+if [ -f "${CONFIG_DIR}/age.key" ]; then
+    chown root:root "${CONFIG_DIR}/age.key"
+    chmod 600 "${CONFIG_DIR}/age.key"
 fi
 
 echo "5. Asignando permisos de ejecución a scripts Python..."

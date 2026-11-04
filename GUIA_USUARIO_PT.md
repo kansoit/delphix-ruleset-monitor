@@ -108,6 +108,7 @@ A instalação mantém separados os scripts executáveis e os dados modificávei
 | Scripts da aplicação | `/usr/local/bin/delphix-ruleset-monitor/` |
 | Comando global | `/usr/local/bin/ruleset_monitor.py` |
 | Configuração local | `/etc/delphix-ruleset-monitor/config.json` |
+| Identidade age das credenciais | `/etc/delphix-ruleset-monitor/age.key` |
 | Banco SQLite de execução | `/var/lib/delphix-ruleset-monitor/delphix_compliance_monitor.db` |
 
 Para desenvolvimento ou testes, defina `DELPHIX_RULESET_MONITOR_DATA_DIR` para usar outro diretório de dados sem mover os scripts.
@@ -122,7 +123,11 @@ sudo ruleset_monitor.py --configure
 
 O assistente solicita a URL, o usuário e a senha do Delphix, as configurações SMTP, o remetente e os destinatários. Ele grava `/etc/delphix-ruleset-monitor/config.json` com permissão `600`.
 
-Os valores com o prefixo `b64:` são apenas ofuscados com Base64; não são criptografados. Proteja `/etc/delphix-ruleset-monitor/config.json` com permissões do sistema de arquivos e, preferencialmente, com um mecanismo externo de gerenciamento de segredos.
+Os usuários e senhas do Delphix e do SMTP são criptografados com [age](https://github.com/FiloSottile/age), que deve estar instalado antes da instalação (no RHEL/Oracle Linux 9: `dnf install age` a partir do EPEL). Na primeira execução, o assistente cria a identidade `/etc/delphix-ruleset-monitor/age.key` com permissões `600` e criptografa esses campos com sua chave pública.
+
+Faça backup de `age.key` separadamente de `config.json`: sem ela não é possível descriptografar as credenciais e será necessário executar `--configure` novamente. Se um campo de credenciais contiver um valor não criptografado, o monitor é interrompido com um erro.
+
+Como o serviço é executado sem intervenção, a identidade fica no mesmo servidor. A criptografia protege as credenciais se `config.json` for copiado, incluído em backups ou compartilhado, mas não contra um usuário que já tem acesso root ao servidor.
 
 ## Preparar o par de Rulesets no Delphix
 
@@ -328,7 +333,8 @@ O modo mock gera Rulesets, tabelas e campos de exemplo. Ele serve para revisar a
 
 ## Considerações de segurança
 
-- Credenciais em Base64 não são criptografadas.
+- As credenciais são criptografadas com age, mas a identidade (`age.key`) fica no mesmo servidor; o root pode descriptografá-las.
+- Proteja `/etc/delphix-ruleset-monitor/age.key` e faça backup dela separadamente.
 - O cliente desativa a validação de certificados TLS do Delphix.
 - O serviço systemd fornecido é executado como `root`.
 - Proteja `/etc/delphix-ruleset-monitor/config.json` e revise os destinatários antes de habilitar o envio de e-mails.

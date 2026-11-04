@@ -108,6 +108,7 @@ The installation keeps executable scripts and modifiable data separate:
 | Application scripts | `/usr/local/bin/delphix-ruleset-monitor/` |
 | Global command | `/usr/local/bin/ruleset_monitor.py` |
 | Local configuration | `/etc/delphix-ruleset-monitor/config.json` |
+| age identity for credentials | `/etc/delphix-ruleset-monitor/age.key` |
 | Runtime SQLite database | `/var/lib/delphix-ruleset-monitor/delphix_compliance_monitor.db` |
 
 For development or testing, set `DELPHIX_RULESET_MONITOR_DATA_DIR` to use another data directory without moving the scripts.
@@ -122,7 +123,11 @@ sudo ruleset_monitor.py --configure
 
 The assistant requests the Delphix URL, username and password, SMTP settings, sender, and recipients. It writes `/etc/delphix-ruleset-monitor/config.json` with mode `600`.
 
-Values with the `b64:` prefix are only Base64-obfuscated; they are not encrypted. Protect `/etc/delphix-ruleset-monitor/config.json` with filesystem permissions and, preferably, an external secrets-management mechanism.
+The Delphix and SMTP usernames and passwords are encrypted with [age](https://github.com/FiloSottile/age), which must be installed before the installation (on RHEL/Oracle Linux 9: `dnf install age` from EPEL). On its first run, the assistant creates the identity `/etc/delphix-ruleset-monitor/age.key` with mode `600` and encrypts those fields with its public key.
+
+Back up `age.key` separately from `config.json`: without it the credentials cannot be decrypted and `--configure` must be run again. If a credential field contains a value that is not encrypted, the monitor stops with an error.
+
+Because the service runs unattended, the identity resides on the same host. Encryption protects the credentials if `config.json` is copied, backed up, or shared, but not against a user who already has root access to the host.
 
 ## Preparing the Ruleset pair in Delphix
 
@@ -329,7 +334,8 @@ Mock mode generates example Rulesets, tables, and fields. It is useful for revie
 
 ## Security considerations
 
-- Base64 credentials are not encrypted.
+- Credentials are encrypted with age, but the identity (`age.key`) resides on the same host; root can decrypt them.
+- Protect `/etc/delphix-ruleset-monitor/age.key` and back it up separately.
 - The client disables TLS certificate validation for Delphix.
 - The supplied systemd service runs as `root`.
 - Protect `/etc/delphix-ruleset-monitor/config.json` and review recipients before enabling email.

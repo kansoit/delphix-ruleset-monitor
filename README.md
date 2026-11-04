@@ -100,8 +100,9 @@ The SQLite database is runtime data. In an installed deployment it is generated 
 - A productive Ruleset and a discovery Ruleset for every monitored pair.
 - SMTP access if email notifications are required.
 - Root privileges for the standard installation and systemd setup.
+- [age](https://github.com/FiloSottile/age) (`age` and `age-keygen` binaries) to encrypt credentials. On RHEL/Oracle Linux 9 it is available from EPEL: `dnf install age`.
 
-The application uses Python standard-library modules only; no external Python package installation is required.
+The application uses Python standard-library modules only; no external Python package installation is required. The installer stops if `age` is not available.
 
 ## Installation
 
@@ -126,6 +127,7 @@ The application keeps executable files and mutable runtime data separate:
 | Application scripts | `/usr/local/bin/delphix-ruleset-monitor/` |
 | Global command link | `/usr/local/bin/ruleset_monitor.py` |
 | Local configuration | `/etc/delphix-ruleset-monitor/config.json` |
+| age identity for credentials | `/etc/delphix-ruleset-monitor/age.key` |
 | SQLite runtime database | `/var/lib/delphix-ruleset-monitor/delphix_compliance_monitor.db` |
 
 For development or testing, set `DELPHIX_RULESET_MONITOR_DATA_DIR` to use another data directory without moving the application scripts.
@@ -140,15 +142,19 @@ sudo ruleset_monitor.py --configure
 
 The assistant requests Delphix and SMTP credentials without displaying password input and writes `/etc/delphix-ruleset-monitor/config.json` with mode `600`.
 
-Secrets may be stored with the `b64:` prefix. This is only reversible Base64 obfuscation, not encryption. Protect `/etc/delphix-ruleset-monitor/config.json` using filesystem permissions and an appropriate secrets-management process.
+The Delphix and SMTP usernames and passwords (`username`, `password`, `smtp_user`, `smtp_password`) are encrypted with age. On its first run, the assistant creates the age identity `/etc/delphix-ruleset-monitor/age.key` with mode `600` and encrypts those fields with its public key. The other fields remain in plain text.
+
+Back up `age.key` separately from `config.json`: without it the credentials cannot be decrypted and `--configure` must be run again. If a credential field contains a value that is not age-encrypted, the monitor stops with an error.
+
+Because the service runs unattended, the identity is stored on the same host. Encryption protects the credentials if `config.json` is copied, backed up, or shared, but not against a user who already has root access to the host.
 
 Important configuration fields include:
 
 ```json
 {
   "delphix_host": "https://delphix.example.com",
-  "username": "b64:...",
-  "password": "b64:...",
+  "username": "-----BEGIN AGE ENCRYPTED FILE-----\n...",
+  "password": "-----BEGIN AGE ENCRYPTED FILE-----\n...",
   "api_prefix": "/masking/api",
   "mock_mode": false,
   "refresh_retries": 2,
@@ -157,8 +163,8 @@ Important configuration fields include:
   "email_enabled": false,
   "smtp_host": "smtp.example.com",
   "smtp_port": 587,
-  "smtp_user": "b64:...",
-  "smtp_password": "b64:...",
+  "smtp_user": "-----BEGIN AGE ENCRYPTED FILE-----\n...",
+  "smtp_password": "-----BEGIN AGE ENCRYPTED FILE-----\n...",
   "use_tls": true,
   "email_from": "delphix-monitor@example.com",
   "email_to": ["operations@example.com"]
@@ -306,8 +312,8 @@ Set `mock_mode` to `true` to exercise the client without contacting Delphix. Moc
 ## Security notes
 
 - The application currently disables TLS certificate and hostname verification for Delphix API calls.
-- Base64 values are not encrypted.
-- Keep `/etc/delphix-ruleset-monitor/config.json` readable only by the service account or root.
+- Credentials are encrypted with age, but the identity (`age.key`) resides on the same host, so root on the host can decrypt them.
+- Keep `/etc/delphix-ruleset-monitor/config.json` and `/etc/delphix-ruleset-monitor/age.key` readable only by root, and back up `age.key` separately.
 - The supplied systemd service runs as `root`.
 - Review SMTP credentials and recipients before enabling notifications.
 
