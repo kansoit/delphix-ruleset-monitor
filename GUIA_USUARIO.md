@@ -127,6 +127,23 @@ Los usuarios y contraseñas de Delphix y SMTP se cifran con [age](https://github
 
 Se debe respaldar `age.key` por separado de `config.json`: sin ella no es posible descifrar las credenciales y habrá que ejecutar nuevamente `--configure`. Si un campo de credenciales contiene un valor sin cifrar, el monitor se detiene con un error.
 
+### Respaldo de la identidad age
+
+Respaldar la identidad inmediatamente después del primer `--configure` y guardar la copia en un lugar distinto de `config.json` (por ejemplo, un gestor de contraseñas o un almacenamiento protegido fuera del servidor). Una copia de `config.json` sin la identidad no sirve.
+
+```bash
+sudo install -m 600 -o root -g root /etc/delphix-ruleset-monitor/age.key /ruta/al/respaldo/seguro/age.key
+```
+
+Para restaurarla en el mismo servidor o en uno nuevo, copiarla de vuelta y verificar que las credenciales se descifran:
+
+```bash
+sudo install -m 600 -o root -g root /ruta/al/respaldo/seguro/age.key /etc/delphix-ruleset-monitor/age.key
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+`--configure` reutiliza la identidad existente, por lo que no invalida el respaldo. Si la identidad se pierde, eliminar `age.key`, ejecutar `--configure` para generar una nueva y volver a ingresar todas las credenciales.
+
 Como el servicio se ejecuta sin intervención, la identidad reside en el mismo servidor. El cifrado protege las credenciales si `config.json` se copia, se respalda o se comparte, pero no frente a un usuario que ya tiene acceso root al servidor.
 
 ## Preparar la pareja de Rulesets en Delphix

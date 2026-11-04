@@ -127,6 +127,23 @@ The Delphix and SMTP usernames and passwords are encrypted with [age](https://gi
 
 Back up `age.key` separately from `config.json`: without it the credentials cannot be decrypted and `--configure` must be run again. If a credential field contains a value that is not encrypted, the monitor stops with an error.
 
+### Backing up the age identity
+
+Back up the identity right after the first `--configure`, and keep the copy in a different location than `config.json` (for example, a password manager or secured storage outside the server). A copy of `config.json` alone is useless without the identity.
+
+```bash
+sudo install -m 600 -o root -g root /etc/delphix-ruleset-monitor/age.key /path/to/secure/backup/age.key
+```
+
+To restore it on the same or a new server, copy it back and verify that the credentials can be decrypted:
+
+```bash
+sudo install -m 600 -o root -g root /path/to/secure/backup/age.key /etc/delphix-ruleset-monitor/age.key
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+`--configure` reuses an existing identity, so it does not invalidate the backup. If the identity is lost, remove `age.key`, run `--configure` to generate a new one, and enter all the credentials again.
+
 Because the service runs unattended, the identity resides on the same host. Encryption protects the credentials if `config.json` is copied, backed up, or shared, but not against a user who already has root access to the host.
 
 ## Preparing the Ruleset pair in Delphix

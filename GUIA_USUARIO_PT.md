@@ -127,6 +127,23 @@ Os usuários e senhas do Delphix e do SMTP são criptografados com [age](https:/
 
 Faça backup de `age.key` separadamente de `config.json`: sem ela não é possível descriptografar as credenciais e será necessário executar `--configure` novamente. Se um campo de credenciais contiver um valor não criptografado, o monitor é interrompido com um erro.
 
+### Backup da identidade age
+
+Faça o backup da identidade logo após o primeiro `--configure` e guarde a cópia em um local diferente de `config.json` (por exemplo, um gerenciador de senhas ou um armazenamento protegido fora do servidor). Uma cópia de `config.json` sem a identidade não serve.
+
+```bash
+sudo install -m 600 -o root -g root /etc/delphix-ruleset-monitor/age.key /caminho/para/backup/seguro/age.key
+```
+
+Para restaurá-la no mesmo servidor ou em um novo, copie-a de volta e verifique se as credenciais são descriptografadas:
+
+```bash
+sudo install -m 600 -o root -g root /caminho/para/backup/seguro/age.key /etc/delphix-ruleset-monitor/age.key
+sudo ruleset_monitor.py --list-engine-rulesets
+```
+
+O `--configure` reutiliza a identidade existente, portanto não invalida o backup. Se a identidade for perdida, remova `age.key`, execute `--configure` para gerar uma nova e informe novamente todas as credenciais.
+
 Como o serviço é executado sem intervenção, a identidade fica no mesmo servidor. A criptografia protege as credenciais se `config.json` for copiado, incluído em backups ou compartilhado, mas não contra um usuário que já tem acesso root ao servidor.
 
 ## Preparar o par de Rulesets no Delphix
