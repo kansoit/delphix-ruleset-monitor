@@ -20,7 +20,7 @@ def decode_secret(val):
         try:
             return base64.b64decode(encoded_part.encode('utf-8')).decode('utf-8')
         except Exception as e:
-            print(f"[WARN] Error al decodificar Base64 de '{val}': {e}")
+            print(f"[WARN] Error al decodificar un valor Base64 de la configuración: {e}")
             return val
     return val
 
@@ -64,10 +64,9 @@ def print_boxed_table(title, headers, rows, col_widths, empty_message="No hay re
 
     print(line_bot + "\n")
 
-def interactive_setup(config_path=None):
+def interactive_setup():
     """Asistente interactivo para configurar credenciales seguras"""
-    if config_path is None:
-        config_path = DEFAULT_CONFIG_PATH
+    config_path = DEFAULT_CONFIG_PATH
 
     print("=" * 140)
     print(f"{'ASISTENTE INTERACTIVO DE CONFIGURACIÓN SEGURA (DELPHIX DRIFT MONITOR)':^140}")
@@ -89,26 +88,30 @@ def interactive_setup(config_path=None):
         val = getpass.getpass(f"{msg} (Entrada oculta) [{ '********' if default else '' }]: ").strip()
         return val if val else decode_secret(default)
 
+    def prompt_bool(msg, default):
+        val = prompt(f"{msg} (true/false)", "true" if default else "false")
+        return val.lower() in ['true', '1', 'si', 'yes']
+
     delphix_host = prompt("Host de Delphix Engine (URL)", existing_config.get("delphix_host", "https://delphix.example.com"))
     username = prompt("Usuario de Delphix Engine", decode_secret(existing_config.get("username", "")))
     password = prompt_secret("Contraseña de Delphix Engine", existing_config.get("password", ""))
 
     print("\n--- Configuración de Notificaciones por Correo (SMTP) ---")
-    email_enabled_str = prompt("¿Habilitar notificaciones por correo? (true/false)", "true" if existing_config.get("email_enabled", True) else "false")
-    email_enabled = email_enabled_str.lower() in ['true', '1', 'si', 'yes']
+    email_enabled = prompt_bool("¿Habilitar notificaciones por correo?", existing_config.get("email_enabled", True))
 
     smtp_host = prompt("Servidor SMTP", existing_config.get("smtp_host", "smtp.example.com"))
     smtp_port = int(prompt("Puerto SMTP", str(existing_config.get("smtp_port", 587))))
     smtp_user = prompt("Usuario SMTP", decode_secret(existing_config.get("smtp_user", "")))
     smtp_password = prompt_secret("Contraseña SMTP", existing_config.get("smtp_password", ""))
-    use_tls_str = prompt("¿Utilizar TLS? (true/false)", "true" if existing_config.get("use_tls", True) else "false")
-    use_tls = use_tls_str.lower() in ['true', '1', 'si', 'yes']
+    use_tls = prompt_bool("¿Utilizar TLS?", existing_config.get("use_tls", True))
 
     email_from = prompt("Remitente (From)", existing_config.get("email_from", "Delphix Ruleset Monitor <delphix-monitor@example.com>"))
     email_to_raw = prompt("Destinatarios separados por coma", ", ".join(existing_config.get("email_to", ["operations@example.com"])))
     email_to = [e.strip() for e in email_to_raw.split(",") if e.strip()]
 
-    new_config = {
+    # Se parte de la configuración existente para conservar claves que el asistente no pregunta (ej. mock_mode)
+    new_config = dict(existing_config)
+    new_config.update({
         "delphix_host": delphix_host,
         "username": encode_secret(username),
         "password": encode_secret(password),
@@ -121,7 +124,7 @@ def interactive_setup(config_path=None):
         "use_tls": use_tls,
         "email_from": email_from,
         "email_to": email_to
-    }
+    })
 
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(new_config, f, indent=2)
@@ -129,9 +132,8 @@ def interactive_setup(config_path=None):
     os.chmod(config_path, 0o600)
     print(f"\n✅ Configuración guardada en '{config_path}' con permisos chmod 600.")
 
-def load_config(config_path=None):
-    if config_path is None:
-        config_path = DEFAULT_CONFIG_PATH
+def load_config():
+    config_path = DEFAULT_CONFIG_PATH
 
     if not os.path.exists(config_path):
         print(f"[ERROR] No existe el archivo de configuración: {config_path}")
@@ -146,6 +148,39 @@ def load_config(config_path=None):
             raw_cfg[k] = decode_secret(v)
 
     return raw_cfg
+
+def build_client(config):
+    """Crea y autentica el cliente de la API de Delphix a partir de la configuración"""
+    client = DelphixMaskingClient(
+        host=config['delphix_host'], username=config['username'], password=config['password'],
+        api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
+    )
+    client.login()
+    return client
+
+def collect_ruleset_state(client, db, prod_id, dummy_id):
+    """
+    Sincroniza el inventario productivo, refresca la Sonda y consulta el catálogo del origen.
+    Retorna (dummy_items, source_table_names). Falla si el refresh de la Sonda no termina bien,
+    para no comparar contra datos desactualizados.
+    """
+    print(f" -> Sincronizando Inventario Productivo (Ruleset {prod_id})...")
+    prod_items = client.get_ruleset_tables_and_columns(prod_id)
+    db.sync_prod_inventory(prod_id, prod_items)
+
+    print(f" -> Refrescando Sonda de Descubrimiento (Ruleset {dummy_id})...")
+    async_task_id = client.refresh_ruleset(dummy_id)
+    if not client.poll_async_task(async_task_id):
+        raise RuntimeError(
+            f"El refresh de la Sonda (Ruleset {dummy_id}) no finalizó correctamente; "
+            f"se interrumpe el proceso para no comparar contra datos desactualizados."
+        )
+
+    dummy_items = client.get_ruleset_tables_and_columns(dummy_id)
+    connector_id = client.get_ruleset_connector_id(dummy_id)
+    source_table_names = client.get_connector_table_names(connector_id)
+    print(f" -> Catálogo del origen consultado mediante conector {connector_id}: {len(source_table_names)} tabla(s).")
+    return dummy_items, source_table_names
 
 def run_audit_cycle(config, db, client):
     print("=" * 140)
@@ -171,20 +206,8 @@ def run_audit_cycle(config, db, client):
 
         print(f"\n--- Ruleset [{idx}/{len(active_rulesets)}]: Productivo ID {prod_id} ('{prod_name}') <-> Sonda ID {dummy_id} ---")
 
-        # Paso 1: Sincronización del Inventario Productivo
-        print(f" -> Sincronizando Inventario Productivo (Ruleset {prod_id})...")
-        prod_items = client.get_ruleset_tables_and_columns(prod_id)
-        db.sync_prod_inventory(prod_id, prod_items)
-
-        # Paso 2: Refresco de la Sonda de Descubrimiento
-        print(f" -> Refrescando Sonda de Descubrimiento (Ruleset {dummy_id})...")
-        async_task_id = client.refresh_ruleset(dummy_id)
-        client.poll_async_task(async_task_id)
-
-        dummy_items = client.get_ruleset_tables_and_columns(dummy_id)
-        connector_id = client.get_ruleset_connector_id(dummy_id)
-        source_table_names = client.get_connector_table_names(connector_id)
-        print(f" -> Catálogo del origen consultado mediante conector {connector_id}: {len(source_table_names)} tabla(s).")
+        # Pasos 1 y 2: Sincronización del Inventario Productivo y Refresco de la Sonda
+        dummy_items, source_table_names = collect_ruleset_state(client, db, prod_id, dummy_id)
 
         # Paso 3: Análisis de Deltas
         analysis = db.analyze_drift(prod_id, dummy_items, source_table_names)
@@ -211,7 +234,7 @@ def run_audit_cycle(config, db, client):
 
     # Renderizar tablas consolidadas en consola
     new_rows = [[
-        s.get('ruleset_name', 'Default'),
+        s['ruleset_name'],
         s['table_name'],
         'Tabla completa' if s['column_name'] == '*' else s['column_name'],
         s['data_type']
@@ -224,7 +247,7 @@ def run_audit_cycle(config, db, client):
         empty_message="Consulta A: No se detectaron estructuras nuevas en el origen sin registrar."
     )
 
-    del_rows = [[s.get('ruleset_name', 'Default'), s['table_name'], s['column_name'], s['algorithm_name']] for s in all_deleted_structures]
+    del_rows = [[s['ruleset_name'], s['table_name'], s['column_name'], s['algorithm_name']] for s in all_deleted_structures]
     print_boxed_table(
         title=f"🚫 ALERTA: ESTRUCTURAS ELIMINADAS EN ORIGEN ({len(all_deleted_structures)} columnas)",
         headers=["RULESET", "TABLA PRODUCTIVA", "COLUMNA CONFIGURADA", "ALGORITMO AFECTADO"],
@@ -233,7 +256,7 @@ def run_audit_cycle(config, db, client):
         empty_message="Consulta B: Todas las estructuras del Ruleset Productivo siguen existiendo en el Origen."
     )
 
-    drift_rows = [[s.get('ruleset_name', 'Default'), s['table_name'], s['column_name'], s['old_data_type'], s['new_data_type']] for s in all_data_type_drifts]
+    drift_rows = [[s['ruleset_name'], s['table_name'], s['column_name'], s['old_data_type'], s['new_data_type']] for s in all_data_type_drifts]
     print_boxed_table(
         title=f"⚡ ALERTA: CAMBIOS EN TIPO DE DATO DETECTADOS EN ORIGEN ({len(all_data_type_drifts)} columnas)",
         headers=["RULESET", "TABLA", "COLUMNA", "TIPO EN RULESET", "TIPO EN ORIGEN"],
@@ -244,11 +267,7 @@ def run_audit_cycle(config, db, client):
 
 def list_orphan_exclusions(config, db):
     """Muestra exclusiones cuya tabla ya no aparece en el catálogo del origen."""
-    client = DelphixMaskingClient(
-        host=config['delphix_host'], username=config['username'], password=config['password'],
-        api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
-    )
-    client.login()
+    client = build_client(config)
 
     orphan_rows = []
     for ruleset in db.list_all_rulesets():
@@ -370,12 +389,8 @@ def main():
             return
 
         try:
-            client = DelphixMaskingClient(
-                host=config['delphix_host'], username=config['username'], password=config['password'],
-                api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
-            )
-            client.login()
-            
+            client = build_client(config)
+
             p_alias = client.get_ruleset_name(p_id)
             d_alias = client.get_ruleset_name(d_id)
             
@@ -411,11 +426,7 @@ def main():
         return
 
     if args.list_engine_rulesets:
-        client = DelphixMaskingClient(
-            host=config['delphix_host'], username=config['username'], password=config['password'],
-            api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
-        )
-        client.login()
+        client = build_client(config)
         engine_rulesets = client.get_all_engine_rulesets()
         rows = [[r['ruleset_id'], r['ruleset_name'], r['type']] for r in engine_rulesets]
         print_boxed_table(
@@ -495,11 +506,7 @@ def main():
         return
 
     # Para comandos que requieren API de Delphix (init-baseline y audit)
-    client = DelphixMaskingClient(
-        host=config['delphix_host'], username=config['username'], password=config['password'],
-        api_prefix=config.get('api_prefix', '/masking/api'), mock_mode=config.get('mock_mode', False)
-    )
-    client.login()
+    client = build_client(config)
 
     if args.init_baseline:
         r_msg = f" para la dupla (Prod ID {args.ruleset_id[0]} <-> Sonda ID {args.ruleset_id[1]})" if args.ruleset_id else " para todos los Rulesets activos"
@@ -507,7 +514,7 @@ def main():
 
         rulesets = db.get_active_rulesets(ruleset_filter=args.ruleset_id)
         if not rulesets:
-            print(f"⚠️ No se encontraron Rulesets activos para procesar la línea base.")
+            print("⚠️ No se encontraron Rulesets activos para procesar la línea base.")
             return
 
         total_exclusions = 0
@@ -517,18 +524,9 @@ def main():
             alias = rs['ruleset_alias']
 
             print(f" -> Procesando línea base para Ruleset '{alias}' (Prod ID: {p_id} <-> Sonda ID: {d_id})...")
-            
-            # 1. Sincronizar Inventario Productivo
-            prod_items = client.get_ruleset_tables_and_columns(p_id)
-            db.sync_prod_inventory(p_id, prod_items)
 
-            # 2. Refrescar Sonda de Descubrimiento
-            async_task_id = client.refresh_ruleset(d_id)
-            client.poll_async_task(async_task_id)
-
-            dummy_items = client.get_ruleset_tables_and_columns(d_id)
-            connector_id = client.get_ruleset_connector_id(d_id)
-            source_table_names = client.get_connector_table_names(connector_id)
+            # 1 y 2. Sincronizar Inventario Productivo y Refrescar Sonda de Descubrimiento
+            dummy_items, source_table_names = collect_ruleset_state(client, db, p_id, d_id)
 
             # 3. Pisar y recalcular delta en exclusions
             c = db.reset_baseline_exclusions(p_id, dummy_items, source_table_names)

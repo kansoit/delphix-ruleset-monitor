@@ -62,15 +62,12 @@ class DatabaseManager:
             conn.commit()
 
     def get_active_rulesets(self, ruleset_filter=None):
-        """Obtiene la lista de Rulesets configurados activos (is_active = 1), o filtrado por dupla/id"""
+        """Obtiene la lista de Rulesets configurados activos (is_active = 1), opcionalmente filtrada por dupla (prod_id, dummy_id)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if ruleset_filter:
-                if isinstance(ruleset_filter, (tuple, list)) and len(ruleset_filter) == 2:
-                    p_id, d_id = ruleset_filter
-                    cursor.execute("SELECT * FROM ruleset_config WHERE is_active = 1 AND prod_ruleset_id = ? AND dummy_ruleset_id = ?", (p_id, d_id))
-                else:
-                    cursor.execute("SELECT * FROM ruleset_config WHERE is_active = 1 AND prod_ruleset_id = ?", (ruleset_filter,))
+                p_id, d_id = ruleset_filter
+                cursor.execute("SELECT * FROM ruleset_config WHERE is_active = 1 AND prod_ruleset_id = ? AND dummy_ruleset_id = ?", (p_id, d_id))
             else:
                 cursor.execute("SELECT * FROM ruleset_config WHERE is_active = 1 ORDER BY prod_ruleset_id")
             return [dict(row) for row in cursor.fetchall()]
@@ -246,7 +243,6 @@ class DatabaseManager:
             for key, dummy_item in dummy_dict.items():
                 if key not in prod_dict and key not in excl_set and key[0] not in excluded_tables:
                     new_structures.append({
-                        'prod_ruleset_id': prod_ruleset_id,
                         'table_name': dummy_item['table_name'],
                         'column_name': dummy_item['column_name'],
                         'data_type': dummy_item.get('data_type', 'VARCHAR')
@@ -258,7 +254,6 @@ class DatabaseManager:
                 table_key = table_name.upper()
                 if table_key not in prod_tables and table_key not in dummy_tables and table_key not in excluded_tables:
                     new_structures.append({
-                        'prod_ruleset_id': prod_ruleset_id,
                         'table_name': table_name,
                         'column_name': '*',
                         'data_type': 'TABLE'
@@ -268,7 +263,6 @@ class DatabaseManager:
             for key, prod_item in prod_dict.items():
                 if key not in dummy_dict:
                     deleted_structures.append({
-                        'prod_ruleset_id': prod_ruleset_id,
                         'table_name': prod_item['table_name'],
                         'column_name': prod_item['column_name'],
                         'algorithm_name': prod_item.get('algorithm_name') or 'Sin Algoritmo'
@@ -282,8 +276,7 @@ class DatabaseManager:
                     d_dt = (dummy_item.get('data_type') or '').strip().lower()
                     if p_dt and d_dt and p_dt != d_dt:
                         data_type_drifts.append({
-                            'prod_ruleset_id': prod_ruleset_id,
-                            'table_name': prod_item['table_name'],
+                                'table_name': prod_item['table_name'],
                             'column_name': prod_item['column_name'],
                             'old_data_type': prod_item.get('data_type'),
                             'new_data_type': dummy_item.get('data_type')

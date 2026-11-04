@@ -15,22 +15,15 @@ class EmailNotifier:
         self.email_from = config.get("email_from", "delphix-monitor@company.com")
         self.email_to = config.get("email_to", [])
 
-    def send_audit_alert(self, ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts=None):
-        """Envia un correo en formato HTML enfocado por Ruleset si existen diferencias detectadas"""
-        if data_type_drifts is None:
-            data_type_drifts = []
-
+    def send_audit_alert(self, ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts):
+        """Envia un correo en formato HTML con las diferencias detectadas en un Ruleset"""
         if not self.enabled:
             print("[INFO] Notificación por correo deshabilitada en la configuración (email_enabled = false).")
-            return False
+            return
 
         if not self.email_to:
             print("[WARN] No se especificaron destinatarios en 'email_to'. No se enviará correo.")
-            return False
-
-        if not new_structures and not deleted_structures and not data_type_drifts:
-            print(f"[INFO] No se detectaron diferencias para el Ruleset '{ruleset_name}'. No se requiere envío de correo.")
-            return False
+            return
 
         subject = f"⚠️ [ALERTA DELPHIX] Deriva de Esquema en Ruleset: {ruleset_name} (ID: {ruleset_id}) - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         
@@ -46,20 +39,17 @@ class EmailNotifier:
 
         try:
             print(f"[INFO] Conectando al servidor SMTP {self.smtp_host}:{self.smtp_port}...")
-            server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15)
-            if self.use_tls:
-                server.starttls()
-            if self.smtp_user and self.smtp_password:
-                server.login(self.smtp_user, self.smtp_password)
-            
-            destinarios = self.email_to if isinstance(self.email_to, list) else [self.email_to]
-            server.sendmail(self.email_from, destinarios, msg.as_string())
-            server.quit()
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
+                if self.use_tls:
+                    server.starttls()
+                if self.smtp_user and self.smtp_password:
+                    server.login(self.smtp_user, self.smtp_password)
+
+                destinarios = self.email_to if isinstance(self.email_to, list) else [self.email_to]
+                server.sendmail(self.email_from, destinarios, msg.as_string())
             print(f"✅ Correo de alerta enviado exitosamente para Ruleset '{ruleset_name}' a: {', '.join(destinarios)}")
-            return True
         except Exception as e:
             print(f"[ERROR] Falló el envío del correo de alerta por SMTP para Ruleset '{ruleset_name}': {e}")
-            return False
 
     def _build_html_report(self, ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts):
         html = f"""
@@ -112,7 +102,7 @@ class EmailNotifier:
                 <tbody>
             """
             for item in new_structures:
-                r_name = item.get('ruleset_name', 'Default')
+                r_name = item['ruleset_name']
                 column_name = 'Tabla completa' if item['column_name'] == '*' else item['column_name']
                 html += f"""
                     <tr>
@@ -145,8 +135,8 @@ class EmailNotifier:
                 <tbody>
             """
             for item in deleted_structures:
-                algo = item['algorithm_name'] or 'Sin Algoritmo'
-                r_name = item.get('ruleset_name', 'Default')
+                algo = item['algorithm_name']
+                r_name = item['ruleset_name']
                 html += f"""
                     <tr>
                         <td><code>{r_name}</code></td>
@@ -179,7 +169,7 @@ class EmailNotifier:
                 <tbody>
             """
             for item in data_type_drifts:
-                r_name = item.get('ruleset_name', 'Default')
+                r_name = item['ruleset_name']
                 html += f"""
                     <tr>
                         <td><code>{r_name}</code></td>

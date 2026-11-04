@@ -2,7 +2,7 @@
   "delphix_host": "https://delphix.example.com",
   "username": "",
   "password": "",
-  "api_prefix": "/api/v5.1",
+  "api_prefix": "/masking/api",
   "mock_mode": true,
   "email_enabled": false,
   "smtp_host": "smtp.example.com",

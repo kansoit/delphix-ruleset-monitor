@@ -4,6 +4,9 @@ import urllib.request
 import ssl
 import time
 
+# IDs que el modo mock trata como Sondas de Descubrimiento (ver get_all_engine_rulesets)
+MOCK_PROBE_RULESET_IDS = {5, 7}
+
 class DelphixMaskingClient:
     """
     Cliente de API REST para Delphix Continuous Compliance (Masking Engine).
@@ -17,18 +20,31 @@ class DelphixMaskingClient:
         self.api_prefix = api_prefix
         self.mock_mode = mock_mode
         self.token = None
+        self._ruleset_names_cache = None
 
         # Deshabilitar verificación SSL para entornos corporativos con certificados autofirmados
         self.ctx = ssl.create_default_context()
         self.ctx.check_hostname = False
         self.ctx.verify_mode = ssl.CERT_NONE
 
+    def _request_json(self, path, method='GET', payload=None):
+        """Ejecuta una petición autenticada contra la API y retorna el JSON de respuesta."""
+        url = f"{self.host}{self.api_prefix}{path}"
+        headers = {'Authorization': self.token}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode('utf-8')
+            headers['Content-Type'] = 'application/json'
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, context=self.ctx) as response:
+            return json.loads(response.read().decode('utf-8'))
+
     def login(self):
         """Autentica contra la API REST de Delphix Engine y obtiene el token Authorization."""
         if self.mock_mode:
             print("[MOCK] Autenticado exitosamente con Delphix Engine.")
             self.token = "MOCK-AUTH-TOKEN-12345"
-            return True
+            return
 
         url = f"{self.host}{self.api_prefix}/login"
         payload = json.dumps({
@@ -44,12 +60,11 @@ class DelphixMaskingClient:
                 res_data = json.loads(response.read().decode('utf-8'))
                 # Delphix Masking Engine retorna {"Authorization": "token-guid"}
                 self.token = res_data.get("Authorization") or res_data.get("token") or res_data.get("authorization")
-                
+
                 if not self.token and "responseList" in res_data:
                     self.token = res_data["responseList"][0].get("token")
 
                 print(f"[SUCCESS] Login exitoso en Delphix Engine: {self.host}")
-                return True
         except Exception as e:
             print(f"[ERROR] Error al autenticar en Delphix: {e}")
             raise
@@ -59,22 +74,10 @@ class DelphixMaskingClient:
         if self.mock_mode:
             return f"Mock_Ruleset_{ruleset_id}"
 
-        if not hasattr(self, '_ruleset_names_cache'):
-            self._ruleset_names_cache = {}
-            try:
-                url = f"{self.host}{self.api_prefix}/database-rulesets?page_size=1000"
-                headers = {'Authorization': self.token}
-                req = urllib.request.Request(url, headers=headers, method='GET')
-                with urllib.request.urlopen(req, context=self.ctx) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    items = res_data.get("responseList", res_data.get("results", []))
-                    for item in items:
-                        r_id = item.get("databaseRulesetId") or item.get("rulesetId") or item.get("id")
-                        r_name = item.get("rulesetName") or item.get("name") or f"Ruleset_{r_id}"
-                        if r_id:
-                            self._ruleset_names_cache[int(r_id)] = r_name
-            except Exception as e:
-                print(f"[WARN] No se pudieron consultar nombres de rulesets desde la API: {e}")
+        if self._ruleset_names_cache is None:
+            self._ruleset_names_cache = {
+                r["ruleset_id"]: r["ruleset_name"] for r in self.get_all_engine_rulesets()
+            }
 
         return self._ruleset_names_cache.get(int(ruleset_id), f"Ruleset_{ruleset_id}")
 
@@ -89,24 +92,20 @@ class DelphixMaskingClient:
             ]
 
         try:
-            url = f"{self.host}{self.api_prefix}/database-rulesets?page_size=1000"
-            headers = {'Authorization': self.token}
-            req = urllib.request.Request(url, headers=headers, method='GET')
-            with urllib.request.urlopen(req, context=self.ctx) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                items = res_data.get("responseList", res_data.get("results", []))
-                rulesets = []
-                for item in items:
-                    r_id = item.get("databaseRulesetId") or item.get("rulesetId") or item.get("id")
-                    r_name = item.get("rulesetName") or item.get("name") or f"Ruleset_{r_id}"
-                    r_type = item.get("rulesetType") or item.get("type") or "DATABASE"
-                    if r_id:
-                        rulesets.append({
-                            "ruleset_id": int(r_id),
-                            "ruleset_name": r_name,
-                            "type": r_type
-                        })
-                return sorted(rulesets, key=lambda x: x["ruleset_id"])
+            res_data = self._request_json("/database-rulesets?page_size=1000")
+            items = res_data.get("responseList", res_data.get("results", []))
+            rulesets = []
+            for item in items:
+                r_id = item.get("databaseRulesetId") or item.get("rulesetId") or item.get("id")
+                r_name = item.get("rulesetName") or item.get("name") or f"Ruleset_{r_id}"
+                r_type = item.get("rulesetType") or item.get("type") or "DATABASE"
+                if r_id:
+                    rulesets.append({
+                        "ruleset_id": int(r_id),
+                        "ruleset_name": r_name,
+                        "type": r_type
+                    })
+            return sorted(rulesets, key=lambda x: x["ruleset_id"])
         except Exception as e:
             print(f"[ERROR] Error al consultar la lista completa de Rulesets en Delphix Engine: {e}")
             return []
@@ -120,14 +119,11 @@ class DelphixMaskingClient:
                 "rulesetName": f"Mock_Ruleset_{ruleset_id}"
             }
 
-        url = f"{self.host}{self.api_prefix}/database-rulesets/{ruleset_id}"
-        req = urllib.request.Request(url, headers={'Authorization': self.token}, method='GET')
         try:
-            with urllib.request.urlopen(req, context=self.ctx) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                if isinstance(data, dict) and data.get('responseList'):
-                    return data['responseList'][0]
-                return data
+            data = self._request_json(f"/database-rulesets/{ruleset_id}")
+            if isinstance(data, dict) and data.get('responseList'):
+                return data['responseList'][0]
+            return data
         except Exception as e:
             raise RuntimeError(f"No se pudo obtener el detalle del Ruleset {ruleset_id}: {e}") from e
 
@@ -148,11 +144,8 @@ class DelphixMaskingClient:
         if self.mock_mode:
             return ["CUSTOMERS", "ORDERS", "AUDIT_LOGS", "TMP_STAGING", "NEW_SOURCE_TABLE"]
 
-        url = f"{self.host}{self.api_prefix}/database-connectors/{connector_id}/fetch"
-        req = urllib.request.Request(url, headers={'Authorization': self.token}, method='GET')
         try:
-            with urllib.request.urlopen(req, context=self.ctx) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            data = self._request_json(f"/database-connectors/{connector_id}/fetch")
             if isinstance(data, list):
                 raw_names = data
             elif isinstance(data, dict):
@@ -178,20 +171,13 @@ class DelphixMaskingClient:
 
     def ensure_refresh_drops_tables(self, ruleset_id):
         """Asegura que el Ruleset en Delphix Engine tenga refreshDropsTables=True para tolerar bajas de tablas en la sonda de descubrimiento"""
-        if self.mock_mode:
-            return
         try:
-            url = f"{self.host}{self.api_prefix}/database-rulesets/{ruleset_id}"
-            req_get = urllib.request.Request(url, headers={'Authorization': self.token})
-            with urllib.request.urlopen(req_get, context=self.ctx) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
+            data = self.get_ruleset_details(ruleset_id)
             if not data.get('refreshDropsTables'):
                 data['refreshDropsTables'] = True
-                req_put = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers={'Authorization': self.token, 'Content-Type': 'application/json'}, method='PUT')
-                with urllib.request.urlopen(req_put, context=self.ctx) as resp_put:
-                    pass
-        except Exception:
-            pass
+                self._request_json(f"/database-rulesets/{ruleset_id}", method='PUT', payload=data)
+        except Exception as e:
+            print(f"[WARN] No se pudo asegurar refreshDropsTables=True en el Ruleset {ruleset_id}: {e}")
 
     def refresh_ruleset(self, ruleset_id):
         """
@@ -205,16 +191,11 @@ class DelphixMaskingClient:
 
         self.ensure_refresh_drops_tables(ruleset_id)
 
-        url = f"{self.host}{self.api_prefix}/database-rulesets/{ruleset_id}/refresh"
-        headers = {'Authorization': self.token, 'Content-Type': 'application/json'}
-        req = urllib.request.Request(url, headers=headers, method='PUT')
-
         try:
-            with urllib.request.urlopen(req, context=self.ctx) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                async_task_id = res_data.get("asyncTaskId") or res_data.get("id") or res_data.get("responseList", [{}])[0].get("asyncTaskId")
-                print(f"[SUCCESS] Refresh disparado para Ruleset ID {ruleset_id}. Async Task ID: {async_task_id}")
-                return async_task_id
+            res_data = self._request_json(f"/database-rulesets/{ruleset_id}/refresh", method='PUT')
+            async_task_id = res_data.get("asyncTaskId") or res_data.get("id") or res_data.get("responseList", [{}])[0].get("asyncTaskId")
+            print(f"[SUCCESS] Refresh disparado para Ruleset ID {ruleset_id}. Async Task ID: {async_task_id}")
+            return async_task_id
         except Exception as e:
             print(f"[ERROR] Error al disparar refresh para Ruleset {ruleset_id}: {e}")
             raise
@@ -228,23 +209,18 @@ class DelphixMaskingClient:
             print(f"[MOCK] Polling GET /async-tasks/{async_task_id} -> SUCCEEDED")
             return True
 
-        url = f"{self.host}{self.api_prefix}/async-tasks/{async_task_id}"
-        headers = {'Authorization': self.token}
-
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                req = urllib.request.Request(url, headers=headers, method='GET')
-                with urllib.request.urlopen(req, context=self.ctx) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    status = res_data.get("status") or res_data.get("responseList", [{}])[0].get("status")
+                res_data = self._request_json(f"/async-tasks/{async_task_id}")
+                status = res_data.get("status") or res_data.get("responseList", [{}])[0].get("status")
 
-                    print(f" -> Estado de tarea asíncrona ({async_task_id}): {status}")
-                    if status in ['SUCCEEDED', 'COMPLETED']:
-                        return True
-                    elif status in ['FAILED', 'CANCELLED']:
-                        print(f"[WARN] La tarea asíncrona {async_task_id} finalizó con estado '{status}' en Delphix Engine.")
-                        return False
+                print(f" -> Estado de tarea asíncrona ({async_task_id}): {status}")
+                if status in ['SUCCEEDED', 'COMPLETED']:
+                    return True
+                elif status in ['FAILED', 'CANCELLED']:
+                    print(f"[WARN] La tarea asíncrona {async_task_id} finalizó con estado '{status}' en Delphix Engine.")
+                    return False
             except Exception as e:
                 print(f"[WARN] Error de comunicación durante polling de async-task {async_task_id}: {e}")
 
@@ -254,25 +230,14 @@ class DelphixMaskingClient:
 
     def _get_column_metadata(self, table_metadata_id):
         """Obtiene las columnas asociadas a una tabla mediante GET /masking/api/column-metadata?table_metadata_id={id}"""
-        if self.mock_mode:
-            return []
-
-        url = f"{self.host}{self.api_prefix}/column-metadata?table_metadata_id={table_metadata_id}&page_size=1000"
-        headers = {'Authorization': self.token}
-        req = urllib.request.Request(url, headers=headers, method='GET')
-
         try:
-            with urllib.request.urlopen(req, context=self.ctx) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                return res_data.get("responseList", res_data.get("results", []))
+            res_data = self._request_json(f"/column-metadata?table_metadata_id={table_metadata_id}&page_size=1000")
+            return res_data.get("responseList", res_data.get("results", []))
         except Exception as e:
             # Reintentar con camelCase si snake_case no matchea
-            url_alt = f"{self.host}{self.api_prefix}/column-metadata?tableMetadataId={table_metadata_id}&page_size=1000"
-            req_alt = urllib.request.Request(url_alt, headers=headers, method='GET')
             try:
-                with urllib.request.urlopen(req_alt, context=self.ctx) as resp_alt:
-                    res_alt = json.loads(resp_alt.read().decode('utf-8'))
-                    return res_alt.get("responseList", res_alt.get("results", []))
+                res_alt = self._request_json(f"/column-metadata?tableMetadataId={table_metadata_id}&page_size=1000")
+                return res_alt.get("responseList", res_alt.get("results", []))
             except Exception:
                 print(f"[WARN] Error al obtener columnas para tableMetadataId={table_metadata_id}: {e}")
                 return []
@@ -283,7 +248,7 @@ class DelphixMaskingClient:
         GET /masking/api/table-metadata?ruleset_id={id} y GET /masking/api/column-metadata?table_metadata_id={id}.
         """
         if self.mock_mode:
-            if ruleset_id == 999: # Dummy Ruleset Origin Discovery
+            if ruleset_id in MOCK_PROBE_RULESET_IDS: # Sonda de Descubrimiento del origen
                 return [
                     {"table_name": "CUSTOMERS", "column_name": "CUSTOMER_ID", "data_type": "INTEGER"},
                     {"table_name": "CUSTOMERS", "column_name": "FULL_NAME", "data_type": "VARCHAR"},
@@ -295,14 +260,14 @@ class DelphixMaskingClient:
                     {"table_name": "AUDIT_LOGS", "column_name": "ACTION_TEXT", "data_type": "VARCHAR"},
                     {"table_name": "TMP_STAGING", "column_name": "SESSION_ID", "data_type": "VARCHAR"}
                 ]
-            else: # Productive Ruleset Inventory
+            else: # Inventario del Ruleset Productivo
                 return [
-                    {"table_name": "CUSTOMERS", "column_name": "CUSTOMER_ID", "algorithm_name": None, "is_key_column": 1},
-                    {"table_name": "CUSTOMERS", "column_name": "FULL_NAME", "algorithm_name": "FirstNameLookup", "is_key_column": 0},
-                    {"table_name": "CUSTOMERS", "column_name": "EMAIL_ADDR", "algorithm_name": "EmailRedact", "is_key_column": 0},
-                    {"table_name": "ORDERS", "column_name": "ORDER_ID", "algorithm_name": None, "is_key_column": 1},
-                    {"table_name": "ORDERS", "column_name": "TOTAL_AMOUNT", "algorithm_name": None, "is_key_column": 0},
-                    {"table_name": "LEGACY_ACCOUNTS", "column_name": "ACCOUNT_NO", "algorithm_name": "AccountNumberMask", "is_key_column": 1}
+                    {"table_name": "CUSTOMERS", "column_name": "CUSTOMER_ID", "algorithm_name": None, "data_type": "INTEGER"},
+                    {"table_name": "CUSTOMERS", "column_name": "FULL_NAME", "algorithm_name": "FirstNameLookup", "data_type": "VARCHAR"},
+                    {"table_name": "CUSTOMERS", "column_name": "EMAIL_ADDR", "algorithm_name": "EmailRedact", "data_type": "VARCHAR"},
+                    {"table_name": "ORDERS", "column_name": "ORDER_ID", "algorithm_name": None, "data_type": "INTEGER"},
+                    {"table_name": "ORDERS", "column_name": "TOTAL_AMOUNT", "algorithm_name": None, "data_type": "NUMERIC"},
+                    {"table_name": "LEGACY_ACCOUNTS", "column_name": "ACCOUNT_NO", "algorithm_name": "AccountNumberMask", "data_type": "VARCHAR"}
                 ]
 
         # Paginación sobre GET /masking/api/table-metadata?ruleset_id={id}
@@ -311,50 +276,42 @@ class DelphixMaskingClient:
         items = []
 
         while True:
-            url = f"{self.host}{self.api_prefix}/table-metadata?ruleset_id={ruleset_id}&page_number={page}&page_size={page_size}"
-            headers = {'Authorization': self.token}
-            req = urllib.request.Request(url, headers=headers, method='GET')
-
             try:
-                with urllib.request.urlopen(req, context=self.ctx) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    response_list = res_data.get("responseList", res_data.get("results", []))
-                    
-                    if not response_list:
-                        break
+                res_data = self._request_json(
+                    f"/table-metadata?ruleset_id={ruleset_id}&page_number={page}&page_size={page_size}"
+                )
+                response_list = res_data.get("responseList", res_data.get("results", []))
 
-                    for tbl in response_list:
-                        table_id = tbl.get("tableMetadataId") or tbl.get("databaseTableId") or tbl.get("id")
-                        table_name = tbl.get("tableName") or tbl.get("table_name")
-                        
-                        # Obtener columnas de cada tabla mediante GET /column-metadata
-                        columns = self._get_column_metadata(table_id)
-                        if not columns:
+                if not response_list:
+                    break
+
+                for tbl in response_list:
+                    table_id = tbl.get("tableMetadataId") or tbl.get("databaseTableId") or tbl.get("id")
+                    table_name = tbl.get("tableName") or tbl.get("table_name")
+
+                    # Obtener columnas de cada tabla mediante GET /column-metadata
+                    columns = self._get_column_metadata(table_id)
+                    if not columns:
+                        items.append({
+                            "table_name": table_name,
+                            "column_name": tbl.get("columnName", "*"),
+                            "algorithm_name": tbl.get("algorithmName"),
+                            "data_type": tbl.get("dataType", "VARCHAR")
+                        })
+                    else:
+                        for col in columns:
                             items.append({
                                 "table_name": table_name,
-                                "column_name": tbl.get("columnName", "*"),
-                                "algorithm_name": tbl.get("algorithmName"),
-                                "data_type": tbl.get("dataType", "VARCHAR"),
-                                "is_key_column": 1 if tbl.get("isKey", False) else 0,
-                                "table_metadata_id": table_id
+                                "column_name": col.get("columnName") or col.get("column_name"),
+                                "algorithm_name": col.get("algorithmName") or col.get("algorithm_name"),
+                                "data_type": col.get("dataType") or col.get("data_type") or "VARCHAR"
                             })
-                        else:
-                            for col in columns:
-                                items.append({
-                                    "table_name": table_name,
-                                    "column_name": col.get("columnName") or col.get("column_name"),
-                                    "algorithm_name": col.get("algorithmName") or col.get("algorithm_name"),
-                                    "data_type": col.get("dataType") or col.get("data_type") or "VARCHAR",
-                                    "is_key_column": 1 if col.get("isPrimaryKey") or col.get("isKey") else 0,
-                                    "table_metadata_id": table_id,
-                                    "column_metadata_id": col.get("columnMetadataId") or col.get("column_metadata_id") or col.get("id")
-                                })
 
-                    page_info = res_data.get("_pageInfo", {})
-                    total_items = page_info.get("total", len(response_list))
-                    if page * page_size >= total_items or len(response_list) < page_size:
-                        break
-                    page += 1
+                page_info = res_data.get("_pageInfo", {})
+                total_items = page_info.get("total", len(response_list))
+                if page * page_size >= total_items or len(response_list) < page_size:
+                    break
+                page += 1
 
             except Exception as e:
                 print(f"[ERROR] Error al consultar tablas para Ruleset {ruleset_id}: {e}")
