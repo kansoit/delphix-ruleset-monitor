@@ -151,6 +151,9 @@ Important configuration fields include:
   "password": "b64:...",
   "api_prefix": "/masking/api",
   "mock_mode": false,
+  "refresh_retries": 2,
+  "refresh_retry_delay_seconds": 60,
+  "refresh_timeout_seconds": 300,
   "email_enabled": false,
   "smtp_host": "smtp.example.com",
   "smtp_port": 587,
@@ -225,7 +228,7 @@ Run an audit:
 sudo ruleset_monitor.py --audit
 ```
 
-Only active pairs are audited. Drift is printed to the terminal and, when enabled, one email is sent for each affected productive Ruleset.
+Only active pairs are audited. Drift is printed to the terminal and, when enabled, one email is sent for each affected productive Ruleset. If a pair cannot be processed, see [Discovery refresh failures](#discovery-refresh-failures).
 
 Inspect local data:
 
@@ -238,6 +241,20 @@ sudo ruleset_monitor.py --list-exclusions --filter-table TABLE_NAME
 sudo ruleset_monitor.py --list-engine-rulesets
 sudo ruleset_monitor.py --list-orphan-exclusions
 ```
+
+### Discovery refresh failures
+
+If the refresh of a discovery Ruleset fails or times out, the monitor retries it according to `refresh_retries`, `refresh_retry_delay_seconds`, and `refresh_timeout_seconds` (defaults: 2, 60, and 300).
+
+If every attempt fails, the pair is reported as not processed and the run continues with the remaining pairs; the monitor never compares against stale discovery data, and `--init-baseline` keeps the previous baseline of that pair. A table of unprocessed Rulesets is printed and, when email is enabled, an incomplete-audit notice is sent on every run while the failure persists.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | All selected pairs were processed, with or without drift. |
+| `75` | Partial run: at least one pair could not be processed. The systemd service declares `SuccessExitStatus=75`, so the unit does not enter the `failed` state. |
+| `1` | General error, such as a missing configuration file or a failed Delphix authentication. |
 
 ## Scheduling
 

@@ -5,11 +5,16 @@ import sys
 import argparse
 import base64
 import getpass
+import time
 from db_manager import DatabaseManager
 from delphix_client import DelphixMaskingClient
 from email_notifier import EmailNotifier
 
 DEFAULT_CONFIG_PATH = "/etc/delphix-ruleset-monitor/config.json"
+
+# Código de salida para ejecuciones parciales (algún Ruleset no pudo procesarse).
+# El servicio systemd lo declara en SuccessExitStatus para no quedar en estado 'failed'.
+EXIT_PARTIAL = 75
 
 def decode_secret(val):
     """Desofusca un secreto Base64 con prefijo 'b64:'"""
@@ -158,7 +163,33 @@ def build_client(config):
     client.login()
     return client
 
-def collect_ruleset_state(client, db, prod_id, dummy_id):
+def refresh_probe(client, config, dummy_id):
+    """
+    Refresca la Sonda de Descubrimiento reintentando ante fallos o timeouts.
+    Lanza RuntimeError si ningún intento finaliza correctamente.
+    """
+    retries = int(config.get('refresh_retries', 2))
+    delay = int(config.get('refresh_retry_delay_seconds', 60))
+    timeout = int(config.get('refresh_timeout_seconds', 300))
+    attempts = retries + 1
+
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            async_task_id = client.refresh_ruleset(dummy_id)
+            if client.poll_async_task(async_task_id, timeout=timeout):
+                return
+            last_error = "la tarea asíncrona de refresh finalizó con estado FAILED o CANCELLED"
+        except Exception as e:
+            last_error = str(e)
+
+        if attempt < attempts:
+            print(f"[WARN] Intento {attempt}/{attempts} de refresh de la Sonda (Ruleset {dummy_id}) fallido: {last_error}. Reintentando en {delay}s...")
+            time.sleep(delay)
+
+    raise RuntimeError(f"El refresh de la Sonda (Ruleset {dummy_id}) falló tras {attempts} intento(s): {last_error}")
+
+def collect_ruleset_state(client, config, db, prod_id, dummy_id):
     """
     Sincroniza el inventario productivo, refresca la Sonda y consulta el catálogo del origen.
     Retorna (dummy_items, source_table_names). Falla si el refresh de la Sonda no termina bien,
@@ -169,12 +200,7 @@ def collect_ruleset_state(client, db, prod_id, dummy_id):
     db.sync_prod_inventory(prod_id, prod_items)
 
     print(f" -> Refrescando Sonda de Descubrimiento (Ruleset {dummy_id})...")
-    async_task_id = client.refresh_ruleset(dummy_id)
-    if not client.poll_async_task(async_task_id):
-        raise RuntimeError(
-            f"El refresh de la Sonda (Ruleset {dummy_id}) no finalizó correctamente; "
-            f"se interrumpe el proceso para no comparar contra datos desactualizados."
-        )
+    refresh_probe(client, config, dummy_id)
 
     dummy_items = client.get_ruleset_tables_and_columns(dummy_id)
     connector_id = client.get_ruleset_connector_id(dummy_id)
@@ -182,7 +208,17 @@ def collect_ruleset_state(client, db, prod_id, dummy_id):
     print(f" -> Catálogo del origen consultado mediante conector {connector_id}: {len(source_table_names)} tabla(s).")
     return dummy_items, source_table_names
 
+def print_failures_table(failures):
+    rows = [[f["ruleset_name"], f["prod_ruleset_id"], f["dummy_ruleset_id"], f["error"]] for f in failures]
+    print_boxed_table(
+        title=f"❌ RULESETS NO PROCESADOS ({len(failures)})",
+        headers=["RULESET", "ID PROD", "ID SONDA", "MOTIVO"],
+        rows=rows,
+        col_widths=[30, 10, 10, 70]
+    )
+
 def run_audit_cycle(config, db, client):
+    """Audita los Rulesets activos. Retorna la lista de Rulesets que no pudieron auditarse."""
     print("=" * 140)
     print(f"{'AUDITORÍA DE RULESETS Y DETECCIÓN DE CAMBIOS EN ORIGEN (DELPHIX)':^140}")
     print("=" * 140)
@@ -191,13 +227,15 @@ def run_audit_cycle(config, db, client):
     active_rulesets = db.get_active_rulesets()
     if not active_rulesets:
         print("\nℹ️  No hay Rulesets activos marcados con evaluación (is_active = YES) para auditar.\n")
-        return
+        return []
 
     print(f"\n[INFO] Procesando {len(active_rulesets)} Ruleset(s) activo(s)...")
 
     all_new_structures = []
     all_deleted_structures = []
     all_data_type_drifts = []
+    failures = []
+    notifier = EmailNotifier(config)
 
     for idx, rs in enumerate(active_rulesets, 1):
         prod_id = rs['prod_ruleset_id']
@@ -206,11 +244,23 @@ def run_audit_cycle(config, db, client):
 
         print(f"\n--- Ruleset [{idx}/{len(active_rulesets)}]: Productivo ID {prod_id} ('{prod_name}') <-> Sonda ID {dummy_id} ---")
 
-        # Pasos 1 y 2: Sincronización del Inventario Productivo y Refresco de la Sonda
-        dummy_items, source_table_names = collect_ruleset_state(client, db, prod_id, dummy_id)
+        # Un fallo en un Ruleset no debe impedir auditar el resto
+        try:
+            # Pasos 1 y 2: Sincronización del Inventario Productivo y Refresco de la Sonda
+            dummy_items, source_table_names = collect_ruleset_state(client, config, db, prod_id, dummy_id)
 
-        # Paso 3: Análisis de Deltas
-        analysis = db.analyze_drift(prod_id, dummy_items, source_table_names)
+            # Paso 3: Análisis de Deltas
+            analysis = db.analyze_drift(prod_id, dummy_items, source_table_names)
+        except Exception as e:
+            print(f"[ERROR] No se pudo auditar el Ruleset '{prod_name}' (Prod ID {prod_id} <-> Sonda ID {dummy_id}): {e}")
+            failures.append({
+                'ruleset_name': prod_name,
+                'prod_ruleset_id': prod_id,
+                'dummy_ruleset_id': dummy_id,
+                'error': str(e)
+            })
+            continue
+
         new_structs = analysis['new_structures']
         deleted_structs = analysis['deleted_structures']
         drifts = analysis['data_type_drifts']
@@ -229,7 +279,6 @@ def run_audit_cycle(config, db, client):
 
         # Enviar correo individual por cada Ruleset si existen deltas
         if new_structs or deleted_structs or drifts:
-            notifier = EmailNotifier(config)
             notifier.send_audit_alert(prod_name, prod_id, dummy_id, new_structs, deleted_structs, drifts)
 
     # Renderizar tablas consolidadas en consola
@@ -264,6 +313,12 @@ def run_audit_cycle(config, db, client):
         col_widths=[28, 22, 22, 18, 18],
         empty_message="Consulta C: No se detectaron cambios en los tipos de datos de las columnas existentes."
     )
+
+    if failures:
+        print_failures_table(failures)
+        notifier.send_failure_alert(failures)
+
+    return failures
 
 def list_orphan_exclusions(config, db):
     """Muestra exclusiones cuya tabla ya no aparece en el catálogo del origen."""
@@ -518,6 +573,7 @@ def main():
             return
 
         total_exclusions = 0
+        failures = []
         for rs in rulesets:
             p_id = rs['prod_ruleset_id']
             d_id = rs['dummy_ruleset_id']
@@ -525,18 +581,36 @@ def main():
 
             print(f" -> Procesando línea base para Ruleset '{alias}' (Prod ID: {p_id} <-> Sonda ID: {d_id})...")
 
-            # 1 y 2. Sincronizar Inventario Productivo y Refrescar Sonda de Descubrimiento
-            dummy_items, source_table_names = collect_ruleset_state(client, db, p_id, d_id)
+            try:
+                # 1 y 2. Sincronizar Inventario Productivo y Refrescar Sonda de Descubrimiento
+                dummy_items, source_table_names = collect_ruleset_state(client, config, db, p_id, d_id)
+            except Exception as e:
+                # La línea base anterior de este Ruleset se conserva intacta
+                print(f"[ERROR] No se pudo reconstruir la línea base del Ruleset '{alias}': {e}")
+                failures.append({
+                    'ruleset_name': alias,
+                    'prod_ruleset_id': p_id,
+                    'dummy_ruleset_id': d_id,
+                    'error': str(e)
+                })
+                continue
 
             # 3. Pisar y recalcular delta en exclusions
             c = db.reset_baseline_exclusions(p_id, dummy_items, source_table_names)
             total_exclusions += c
 
-        print(f"✅ Línea Base nivelada exitosamente. Se registraron {total_exclusions} elementos en el delta de exclusiones{r_msg}.")
+        processed = len(rulesets) - len(failures)
+        print(f"✅ Línea Base nivelada para {processed}/{len(rulesets)} Ruleset(s). Se registraron {total_exclusions} elementos en el delta de exclusiones.")
+        if failures:
+            print_failures_table(failures)
+            print("⚠️ Los Rulesets no procesados conservan su línea base anterior.")
+            sys.exit(EXIT_PARTIAL)
         return
 
     if args.audit:
-        run_audit_cycle(config, db, client)
+        failures = run_audit_cycle(config, db, client)
+        if failures:
+            sys.exit(EXIT_PARTIAL)
     else:
         parser.print_help()
 

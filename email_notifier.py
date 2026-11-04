@@ -3,6 +3,23 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
+from html import escape
+
+REPORT_STYLE = """<style>
+                body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; margin: 20px; }
+                .header { background-color: #003366; color: #ffffff; padding: 15px; text-align: center; border-radius: 5px; }
+                .ruleset-banner { background-color: #e9ecef; color: #1b1e21; padding: 10px; border-left: 5px solid #003366; margin: 15px 0; border-radius: 3px; }
+                .alert-box { background-color: #fff3cd; color: #856404; padding: 10px; border: 1px solid #ffeeba; border-radius: 5px; margin-bottom: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 25px; }
+                th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+                th { background-color: #f2f2f2; color: #333; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
+                .badge-new { background-color: #d4edda; color: #155724; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
+                .badge-del { background-color: #f8d7da; color: #721c24; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
+                .badge-drift { background-color: #cce5ff; color: #004085; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
+                .badge-fail { background-color: #f8d7da; color: #721c24; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
+                .footer { font-size: 12px; color: #777; margin-top: 30px; text-align: center; border-top: 1px solid #eee; padding-top: 10px; }
+            </style>"""
 
 class EmailNotifier:
     def __init__(self, config):
@@ -17,6 +34,19 @@ class EmailNotifier:
 
     def send_audit_alert(self, ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts):
         """Envia un correo en formato HTML con las diferencias detectadas en un Ruleset"""
+        subject = f"⚠️ [ALERTA DELPHIX] Deriva de Esquema en Ruleset: {ruleset_name} (ID: {ruleset_id}) - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        # Construir cuerpo HTML profesional enfocado en el Ruleset
+        html_content = self._build_html_report(ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts)
+        self._send(subject, html_content, f"Ruleset '{ruleset_name}'")
+
+    def send_failure_alert(self, failures):
+        """Envia un correo operativo con los Rulesets que no pudieron auditarse en la ejecución actual"""
+        subject = f"❌ [ALERTA DELPHIX] Auditoría incompleta: {len(failures)} Ruleset(s) sin auditar - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        html_content = self._build_failure_report(failures)
+        self._send(subject, html_content, "auditoría incompleta")
+
+    def _send(self, subject, html_content, description):
         if not self.enabled:
             print("[INFO] Notificación por correo deshabilitada en la configuración (email_enabled = false).")
             return
@@ -24,11 +54,6 @@ class EmailNotifier:
         if not self.email_to:
             print("[WARN] No se especificaron destinatarios en 'email_to'. No se enviará correo.")
             return
-
-        subject = f"⚠️ [ALERTA DELPHIX] Deriva de Esquema en Ruleset: {ruleset_name} (ID: {ruleset_id}) - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        
-        # Construir cuerpo HTML profesional enfocado en el Ruleset
-        html_content = self._build_html_report(ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts)
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -47,9 +72,67 @@ class EmailNotifier:
 
                 destinarios = self.email_to if isinstance(self.email_to, list) else [self.email_to]
                 server.sendmail(self.email_from, destinarios, msg.as_string())
-            print(f"✅ Correo de alerta enviado exitosamente para Ruleset '{ruleset_name}' a: {', '.join(destinarios)}")
+            print(f"✅ Correo de alerta enviado exitosamente ({description}) a: {', '.join(destinarios)}")
         except Exception as e:
-            print(f"[ERROR] Falló el envío del correo de alerta por SMTP para Ruleset '{ruleset_name}': {e}")
+            print(f"[ERROR] Falló el envío del correo de alerta por SMTP ({description}): {e}")
+
+    def _build_failure_report(self, failures):
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            {REPORT_STYLE}
+        </head>
+        <body>
+            <div class="header">
+                <h2>Delphix Continuous Compliance - Auditoría de Esquema</h2>
+            </div>
+
+            <p>Estimado Operador,</p>
+            <p>La auditoría quedó <strong>incompleta</strong>: los siguientes Rulesets no pudieron auditarse porque no fue posible obtener una foto actualizada del origen. <strong>Para estos Rulesets no se evaluaron diferencias</strong>, por lo que la ausencia de alertas de deriva no implica que el esquema esté sin cambios.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ruleset</th>
+                        <th>ID Productivo</th>
+                        <th>ID Sonda</th>
+                        <th>Motivo</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        for item in failures:
+            html += f"""
+                    <tr>
+                        <td><code>{escape(item['ruleset_name'])}</code></td>
+                        <td>{item['prod_ruleset_id']}</td>
+                        <td>{item['dummy_ruleset_id']}</td>
+                        <td>{escape(item['error'])}</td>
+                        <td><span class="badge-fail">NO AUDITADO</span></td>
+                    </tr>
+            """
+        html += f"""
+                </tbody>
+            </table>
+
+            <div class="alert-box">
+                <strong>Acciones sugeridas:</strong>
+                <ul>
+                    <li>Verifique en Delphix Engine el estado de las tareas de refresh de las Sondas indicadas y el conector de base de datos asociado (credenciales, conectividad y permisos sobre el origen).</li>
+                    <li>Una vez corregida la causa, ejecute manualmente la auditoría: <code>ruleset_monitor.py --audit</code></li>
+                    <li>Este aviso se repetirá en cada ejecución mientras la falla persista.</li>
+                </ul>
+            </div>
+
+            <div class="footer">
+                <p>Reporte generado automáticamente por Delphix Ruleset Drift Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+        </body>
+        </html>
+        """
+        return html
 
     def _build_html_report(self, ruleset_name, ruleset_id, dummy_ruleset_id, new_structures, deleted_structures, data_type_drifts):
         html = f"""
@@ -57,20 +140,7 @@ class EmailNotifier:
         <html>
         <head>
             <meta charset="utf-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; color: #333; line-height: 1.6; margin: 20px; }}
-                .header {{ background-color: #003366; color: #ffffff; padding: 15px; text-align: center; border-radius: 5px; }}
-                .ruleset-banner {{ background-color: #e9ecef; color: #1b1e21; padding: 10px; border-left: 5px solid #003366; margin: 15px 0; border-radius: 3px; }}
-                .alert-box {{ background-color: #fff3cd; color: #856404; padding: 10px; border: 1px solid #ffeeba; border-radius: 5px; margin-bottom: 20px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 25px; }}
-                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-                th {{ background-color: #f2f2f2; color: #333; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .badge-new {{ background-color: #d4edda; color: #155724; padding: 3px 8px; border-radius: 3px; font-weight: bold; }}
-                .badge-del {{ background-color: #f8d7da; color: #721c24; padding: 3px 8px; border-radius: 3px; font-weight: bold; }}
-                .badge-drift {{ background-color: #cce5ff; color: #004085; padding: 3px 8px; border-radius: 3px; font-weight: bold; }}
-                .footer {{ font-size: 12px; color: #777; margin-top: 30px; text-align: center; border-top: 1px solid #eee; padding-top: 10px; }}
-            </style>
+            {REPORT_STYLE}
         </head>
         <body>
             <div class="header">

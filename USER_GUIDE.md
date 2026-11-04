@@ -272,6 +272,25 @@ sudo ruleset_monitor.py --purge -y
 
 The SQLite database is created at `/var/lib/delphix-ruleset-monitor/delphix_compliance_monitor.db` in a standard installation. If it does not exist, the program automatically creates the required structure when it starts. For development or testing, use `DELPHIX_RULESET_MONITOR_DATA_DIR`.
 
+## Discovery refresh failures
+
+If the refresh of a discovery Ruleset fails or times out, the monitor retries it. The values can be tuned in `config.json` (these defaults apply when omitted):
+
+```json
+"refresh_retries": 2,
+"refresh_retry_delay_seconds": 60,
+"refresh_timeout_seconds": 300
+```
+
+If every attempt fails:
+
+- The pair is reported as not processed and the run continues with the remaining pairs. The monitor never compares against stale discovery data.
+- A table of unprocessed Rulesets is printed at the end and, when email is enabled, an incomplete-audit notice is sent. The notice is repeated on every run while the failure persists, so the operator must act on it.
+- With `--init-baseline`, the pair keeps its previous baseline.
+- The process exits with code `75`. The systemd service declares `SuccessExitStatus=75`, so the unit does not enter the `failed` state; the failure remains visible in `journalctl` and in the email.
+
+General errors, such as a missing configuration file or a failed Delphix authentication, exit with code `1` and do leave the unit in the `failed` state.
+
 ## Automatic execution with systemd
 
 ```bash

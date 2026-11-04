@@ -12,6 +12,8 @@ ExecStart=/usr/bin/env python3 /usr/local/bin/delphix-ruleset-monitor/ruleset_mo
 StandardOutput=journal
 StandardError=journal
 Restart=no
+# 75 = auditoría parcial (algún Ruleset no pudo auditarse); se notifica por correo sin marcar la unidad como fallida
+SuccessExitStatus=75
 
 [Install]
 WantedBy=multi-user.target
