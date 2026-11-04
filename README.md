@@ -102,7 +102,7 @@ The SQLite database is runtime data. In an installed deployment it is generated 
 - Root privileges for the standard installation and systemd setup.
 - [age](https://github.com/FiloSottile/age) (`age` and `age-keygen` binaries) to encrypt credentials. On RHEL/Oracle Linux 9 it is available from EPEL: `dnf install age`.
 
-The application uses Python standard-library modules only; no external Python package installation is required. The installer stops if `age` is not available.
+The application uses Python standard-library modules only; no external Python package installation is required. The installer completes without `age` but warns about it at the start and in its final summary; `--configure` and audits fail until `age` is installed.
 
 ## Installation
 

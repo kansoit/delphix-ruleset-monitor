@@ -18,13 +18,16 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# age se utiliza para cifrar las credenciales de config.json
+# age se utiliza para cifrar las credenciales de config.json. Sin él la aplicación
+# se instala igual, pero --configure y las auditorías fallan hasta instalarlo.
 # sudo suele reemplazar PATH por un secure_path sin /usr/local/bin, donde se instala age
 PATH="${PATH}:/usr/local/bin"
+AGE_MISSING=0
 if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
-  echo "❌ Error: No se encontraron los binarios 'age' y 'age-keygen'."
-  echo "   Instale age antes de continuar (ej. 'dnf install age' desde EPEL)."
-  exit 1
+  AGE_MISSING=1
+  echo "⚠️  Advertencia: No se encontraron los binarios 'age' y 'age-keygen'."
+  echo "   La instalación continúa, pero las credenciales no podrán cifrarse ni descifrarse"
+  echo "   hasta instalar age (ej. 'dnf install age' desde EPEL)."
 fi
 
 echo "1. Creando directorios de instalación y datos..."
@@ -97,6 +100,11 @@ echo "==========================================================================
 echo "Archivos instalados en: ${INSTALL_DIR}"
 echo "Estado del Timer Systemd: $(systemctl is-active delphix-ruleset-monitor.timer)"
 echo ""
+if [ "${AGE_MISSING}" -eq 1 ]; then
+  echo "⚠️  FALTA age: instálelo antes de configurar credenciales o ejecutar auditorías"
+  echo "   (ej. 'dnf install age' desde EPEL). Sin age, --configure y --audit fallan."
+  echo ""
+fi
 echo "Pasos sugeridos:"
 echo " 1) Si aún no configuraste credenciales, ejecuta el asistente seguro:"
 echo "    sudo ruleset_monitor.py --configure"

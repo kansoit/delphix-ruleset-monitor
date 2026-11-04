@@ -123,7 +123,7 @@ sudo ruleset_monitor.py --configure
 
 O assistente solicita a URL, o usuário e a senha do Delphix, as configurações SMTP, o remetente e os destinatários. Ele grava `/etc/delphix-ruleset-monitor/config.json` com permissão `600`.
 
-Os usuários e senhas do Delphix e do SMTP são criptografados com [age](https://github.com/FiloSottile/age), que deve estar instalado antes da instalação (no RHEL/Oracle Linux 9: `dnf install age` a partir do EPEL). Na primeira execução, o assistente cria a identidade `/etc/delphix-ruleset-monitor/age.key` com permissões `600` e criptografa esses campos com sua chave pública.
+Os usuários e senhas do Delphix e do SMTP são criptografados com [age](https://github.com/FiloSottile/age), que deve estar instalado antes de configurar as credenciais (no RHEL/Oracle Linux 9: `dnf install age` a partir do EPEL). O instalador termina mesmo sem ele, mas avisa no início e no resumo final. Na primeira execução, o assistente cria a identidade `/etc/delphix-ruleset-monitor/age.key` com permissões `600` e criptografa esses campos com sua chave pública.
 
 Faça backup de `age.key` separadamente de `config.json`: sem ela não é possível descriptografar as credenciais e será necessário executar `--configure` novamente. Se um campo de credenciais contiver um valor não criptografado, o monitor é interrompido com um erro.
 
